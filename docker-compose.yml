@@ -1,12 +1,11 @@
 services:
   overseer:
-    build: .
-    image: overseer:latest
+    image: ${OVERSEER_IMAGE:-ccr.ccs.tencentyun.com/audi-dask/overseer:20260730-fix1}
     container_name: overseer
     ports:
       - "${PORT:-8080}:8080"
     environment:
-      MASTER_KEY: ${MASTER_KEY:?请在 .env 中设置 MASTER_KEY}
+      MASTER_KEY: ${MASTER_KEY:?set MASTER_KEY in .env}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
       PORT: "8080"
       DB_PATH: /data/overseer.db

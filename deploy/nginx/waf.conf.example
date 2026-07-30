@@ -1,0 +1,50 @@
+# Example: origin nginx behind WAF/LB (copy to conf.d and replace placeholders)
+#
+# Topology:
+#   GitLab / browser  →  WAF/LB (<WAF_IP>)  →  nginx :80  →  overseer :8080
+#
+# <WAF_IP> is the upstream WAF address; $remote_addr is the WAF unless real_ip is set.
+# Use real_ip so allow/deny and logs see the client in X-Forwarded-For.
+
+upstream overseer {
+    server 127.0.0.1:8080;
+    keepalive 8;
+}
+
+server {
+    listen 80;
+    server_name call.example.com;
+
+    access_log /var/log/nginx/call.example.com.access.log main;
+    client_max_body_size 2m;
+
+    # WAF / LB in front of this nginx — replace with your WAF egress IP or CIDR
+    set_real_ip_from 203.0.113.10;
+    real_ip_header X-Forwarded-For;
+    real_ip_recursive on;
+
+    # Public: GitLab webhooks only
+    location ~ ^/hooks/[A-Za-z0-9_-]+$ {
+        limit_except POST {
+            deny all;
+        }
+
+        # Real client after real_ip — replace with GitLab / trusted egress IPs
+        allow 198.51.100.50;
+        allow 203.0.113.20;
+        deny all;
+
+        proxy_pass http://overseer;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $http_x_forwarded_proto;
+        proxy_set_header Connection "";
+    }
+
+    # Admin UI / login — not exposed on this hostname (use http://<server-ip>:8080/ on LAN)
+    location / {
+        return 404;
+    }
+}

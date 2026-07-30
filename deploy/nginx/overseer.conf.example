@@ -1,0 +1,40 @@
+# Overseer nginx example: public webhooks only (origin listens on HTTP :80)
+#
+# TLS / HTTPS (443) is usually terminated at the load balancer in front of this host.
+# The LB forwards plain HTTP to nginx :80; set Callback Base URL to the public URL
+# GitLab uses (often https://review.example.com if the LB serves HTTPS).
+#
+# - Public hooks: http://review.example.com/hooks/{instance_id}  (GitLab POST only)
+# - Internal admin: http://<server-ip>:8080/  (LAN/VPN; default compose PORT=8080)
+
+upstream overseer {
+    server 127.0.0.1:8080;
+    keepalive 8;
+}
+
+server {
+    listen 80;
+    server_name review.example.com;
+
+    access_log /var/log/nginx/review.example.com.access.log main;
+    client_max_body_size 2m;
+
+    # GitLab project hooks: POST /hooks/{instance_id}
+    location ~ ^/hooks/[A-Za-z0-9_-]+$ {
+        limit_except POST {
+            deny all;
+        }
+
+        proxy_pass http://overseer;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Connection "";
+    }
+
+    location / {
+        return 404;
+    }
+}

@@ -16,8 +16,9 @@ Overseer connects to GitLab (more VCS providers planned), watches MR or Push eve
 
 ### Important
 
-- Set **`MASTER_KEY`** before first run. It encrypts VCS tokens and LLM API keys in SQLite. Changing it invalidates stored credentials — re-enter them in the admin UI.
-- Set the **callback Base URL** to an address GitLab can reach (e.g. `https://review.example.com`). Webhooks use `{base}/hooks/{instance_id}`.
+- Set a **fixed** **`MASTER_KEY`** in `.env` before first run. It encrypts VCS tokens and LLM API keys. Changing it invalidates stored credentials — re-enter them in the admin UI.
+- Set the **callback Base URL** in the admin UI to the public address GitLab uses (e.g. `http://review.example.com`, or `https://…` if TLS terminates at your load balancer). Webhooks use `{base}/hooks/{instance_id}`.
+- If the container registry is private, run `docker login` against your registry before `docker compose pull`.
 
 ### Features
 
@@ -30,51 +31,86 @@ Overseer connects to GitLab (more VCS providers planned), watches MR or Push eve
 | Notify | Feishu interactive cards; generic JSON webhooks |
 | Ops | Review history, per-run logs, manual re-run |
 
-### Quick start
+### Deploy (Docker Compose)
 
-```bash
-git clone https://github.com/Audi-dask/Overseer.git
-cd Overseer
+1. Get `docker-compose.yml` and `.env.example` from this repository (clone or copy the two files into a deploy directory).
 
-export MASTER_KEY="$(openssl rand -hex 32)"
-# optional: export ADMIN_PASSWORD=... PORT=8080
-
-go run ./cmd/server
-```
-
-Open `http://localhost:8080` and complete the first-time admin setup.
-
-### Docker
+2. Configure environment:
 
 ```bash
 cp .env.example .env
-# edit MASTER_KEY in .env
-
-docker compose up -d --build
+# Generate a fixed key: openssl rand -hex 32
+# Edit .env — at minimum set MASTER_KEY; optionally PORT and ADMIN_PASSWORD
 ```
 
-Data persists in the `overseer-data` volume (`/data/overseer.db`, workspaces, review logs).
-
-### Build
-
-Requires **Go 1.25+** and **git** (for agent checkout).
+3. (Optional) Override the image in `.env`:
 
 ```bash
-CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o overseer ./cmd/server
+# OVERSEER_IMAGE=ccr.ccs.tencentyun.com/audi-dask/overseer:20260730-fix1
 ```
 
-The [Dockerfile](Dockerfile) uses the same flags. UI assets are embedded; restart the binary after editing `internal/ui/dist/`.
+4. Start:
+
+```bash
+docker compose pull
+docker compose up -d
+docker compose logs -f overseer
+```
+
+5. Open **`http://<server-ip>:8080/`** on your LAN/VPN for first-time admin setup (see [Public exposure](#public-exposure-en)).
+
+Data persists in the **`overseer-data`** volume (`/data/overseer.db`, workspaces, review logs).
+
+**Upgrade**
+
+```bash
+docker compose pull
+docker compose up -d
+```
 
 ### Configuration
 
-| Setting | Notes |
+| Variable | Notes |
 | --- | --- |
-| `MASTER_KEY` | Required in production |
-| `DB_PATH` | Default `data/overseer.db` |
-| `WORKSPACE_DIR` | Shallow clone cache (default `data/workspaces`) |
-| `REVIEW_LOG_DIR` | Per-review logs (default `data/reviewlogs`) |
+| `MASTER_KEY` | Required; keep stable across restarts |
+| `PORT` | Host port mapped to container `8080` (default **8080**) |
+| `ADMIN_PASSWORD` | Optional; skips first-time setup when set |
+| `OVERSEER_IMAGE` | Container image (see `docker-compose.yml` default) |
 | Callback Base URL | Admin → Settings; must be public to GitLab |
 | Webhook secret | Validated on incoming hooks (not the admin password) |
+
+Inside the container: `DB_PATH=/data/overseer.db`, `WORKSPACE_DIR=/data/workspaces`, `REVIEW_LOG_DIR=/data/reviewlogs`.
+
+### Public exposure {#public-exposure-en}
+
+Expose **only** GitLab webhook callbacks on the public internet. Do **not** put `/api/auth/login`, the admin UI, or other `/api/*` routes on a public hostname.
+
+| Access | URL | Purpose |
+| --- | --- | --- |
+| Public | `http://review.example.com/hooks/{instance_id}` | GitLab `POST` webhooks only (nginx **:80** on origin; **443** at LB if used) |
+| Internal | `http://10.x.x.x:8080/` (VPN / LAN) | Login, settings, review UI |
+
+Set **Callback Base URL** to the URL GitLab reaches (often `https://review.example.com` when the LB terminates TLS). Open the admin UI at **`http://<server-ip>:8080/`** on your LAN/VPN only.
+
+Nginx on the origin listens on **port 80** and reverse-proxies to `http://127.0.0.1:8080`. Change `.env` `PORT` only if **8080** is already taken on that host.
+
+Example nginx config: [`deploy/nginx/overseer.conf.example`](deploy/nginx/overseer.conf.example)
+
+```nginx
+upstream overseer { server 127.0.0.1:8080; }
+
+server {
+    listen 80;
+    server_name review.example.com;
+    location ~ ^/hooks/[A-Za-z0-9_-]+$ {
+        limit_except POST { deny all; }
+        proxy_pass http://overseer;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+    location / { return 404; }
+}
+```
 
 ### License
 
@@ -98,8 +134,9 @@ Overseer 是自托管的代码审查服务：对接 GitLab（更多 VCS 规划�
 
 ### 重要说明
 
-- 首次运行前必须设置 **`MASTER_KEY`**，用于加密 SQLite 中的 VCS Token 与 LLM Key。变更后已存凭证失效，需在管理台重新填写。
-- **回调 Base URL** 必须是 GitLab 能访问的公网地址（如 `https://review.example.com`）。钩子地址为 `{base}/hooks/{instance_id}`。
+- 在 `.env` 中设置**固定**的 **`MASTER_KEY`** 后再启动。用于加密 VCS Token 与 LLM Key；变更后已存凭证失效，需在管理台重新填写。
+- 在管理台配置 **回调 Base URL** 为 GitLab 实际访问的公网地址（源站 nginx 为 **80** 时可填 `http://…`；若 LB 对外提供 **HTTPS**，填 `https://…`）。钩子路径为 `{base}/hooks/{instance_id}`。
+- 若镜像仓库为私有，请先 `docker login` 对应 registry，再执行 `docker compose pull`。
 
 ### 功能概览
 
@@ -112,51 +149,86 @@ Overseer 是自托管的代码审查服务：对接 GitLab（更多 VCS 规划�
 | 通知 | 飞书 interactive 卡片；通用 Webhook JSON |
 | 运维 | 审查记录、单次运行日志、手动重跑 |
 
-### 快速启动
+### 部署（Docker Compose）
 
-```bash
-git clone https://github.com/Audi-dask/Overseer.git
-cd Overseer
+1. 从本仓库获取 `docker-compose.yml` 与 `.env.example`（克隆仓库，或仅复制这两个文件到部署目录）。
 
-export MASTER_KEY="$(openssl rand -hex 32)"
-# 可选：export ADMIN_PASSWORD=... PORT=8080
-
-go run ./cmd/server
-```
-
-浏览器打开 `http://localhost:8080`，完成首次管理员设置。
-
-### Docker 部署
+2. 配置环境变量：
 
 ```bash
 cp .env.example .env
-# 编辑 .env 中的 MASTER_KEY
-
-docker compose up -d --build
+# 生成固定密钥：openssl rand -hex 32
+# 编辑 .env — 至少设置 MASTER_KEY；可选 PORT、ADMIN_PASSWORD
 ```
 
-数据保存在 `overseer-data` 卷（数据库、工作区、审查日志）。
-
-### 构建
-
-需要 **Go 1.25+** 与 **git**（Agent checkout 依赖）。
+3. （可选）在 `.env` 中覆盖镜像：
 
 ```bash
-CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o overseer ./cmd/server
+# OVERSEER_IMAGE=ccr.ccs.tencentyun.com/audi-dask/overseer:20260730-fix1
 ```
 
-[Dockerfile](Dockerfile) 使用相同参数。UI 为 embed 静态资源，修改 `internal/ui/dist/` 后需重启进程。
+4. 启动：
+
+```bash
+docker compose pull
+docker compose up -d
+docker compose logs -f overseer
+```
+
+5. 在内网/VPN 打开 **`http://<服务器IP>:8080/`** 完成首次设置（见[公网暴露](#public-exposure-zh)）。
+
+数据保存在 **`overseer-data`** 卷（数据库、工作区、审查日志）。
+
+**升级**
+
+```bash
+docker compose pull
+docker compose up -d
+```
 
 ### 配置要点
 
-| 项 | 说明 |
+| 变量 | 说明 |
 | --- | --- |
-| `MASTER_KEY` | 生产环境必填 |
-| `DB_PATH` | 默认 `data/overseer.db` |
-| `WORKSPACE_DIR` | 浅克隆缓存（默认 `data/workspaces`） |
-| `REVIEW_LOG_DIR` | 单次审查日志（默认 `data/reviewlogs`） |
+| `MASTER_KEY` | 必填；重启后保持不变 |
+| `PORT` | 宿主机映射端口，默认 **8080**（对应容器内 `8080`） |
+| `ADMIN_PASSWORD` | 可选；设置后跳过首次初始化 |
+| `OVERSEER_IMAGE` | 容器镜像（默认值见 `docker-compose.yml`） |
 | 回调 Base URL | 管理台 → 服务设置；须对 GitLab 可达 |
 | 钩子 Secret | 校验入站 Webhook（非管理台登录密码） |
+
+容器内路径：`DB_PATH=/data/overseer.db`，`WORKSPACE_DIR=/data/workspaces`，`REVIEW_LOG_DIR=/data/reviewlogs`。
+
+### 公网暴露 {#public-exposure-zh}
+
+公网**只暴露 GitLab 回调** `/hooks/{instance_id}`，不要把 `/api/auth/login`、管理台 UI 或其它 `/api/*` 放到公网域名上。
+
+| 访问面 | 地址 | 用途 |
+| --- | --- | --- |
+| 公网 | `http://review.example.com/hooks/{instance_id}` | 仅 GitLab Webhook（源站 nginx **:80**；**443** 一般在 LB） |
+| 内网 | `http://10.x.x.x:8080/`（VPN / 办公网） | 登录、配置、审查记录 |
+
+**回调 Base URL** 填 GitLab 能访问到的对外 URL（LB 终结 TLS 时通常为 `https://review.example.com`）。管理台仅在 **内网/VPN** 通过 **`http://<服务器IP>:8080/`** 访问。
+
+源站 nginx 监听 **80**，反代到 `http://127.0.0.1:8080`。仅当宿主机 **8080** 已被占用时，再在 `.env` 里改 `PORT`。
+
+完整示例：[`deploy/nginx/overseer.conf.example`](deploy/nginx/overseer.conf.example)
+
+```nginx
+upstream overseer { server 127.0.0.1:8080; }
+
+server {
+    listen 80;
+    server_name review.example.com;
+    location ~ ^/hooks/[A-Za-z0-9_-]+$ {
+        limit_except POST { deny all; }
+        proxy_pass http://overseer;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+    location / { return 404; }
+}
+```
 
 ### 许可
 
