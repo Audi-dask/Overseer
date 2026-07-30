@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>通知渠道 · Overseer</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" />
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet" />
+    <link href="css/app.css" rel="stylesheet" />
+  </head>
+  <body>
+    <div id="app" class="app-shell">
+      <div id="page-content" hidden>
+        <div class="boundary-banner">
+          启用通知后选 Webhook 分组；飞书渠道发送 <code>interactive</code> 卡片（提交人 / 项目 / 结论摘要 + 跳转按钮），不重复审查正文。
+        </div>
+
+        <div class="panel mb-3">
+          <div class="panel-header">
+            <h2>Webhook 分组</h2>
+            <button class="btn btn-sm btn-primary" id="btn-add-group" type="button">
+              <i class="bi bi-plus-lg"></i> 添加分组
+            </button>
+          </div>
+          <div class="px-3 pt-3 pb-0 text-secondary small">
+            仓库页的「通知分组」下拉只能选到<strong>分组</strong>，不能直接选渠道。顺序是：先建渠道 → 再建分组并勾选渠道 → 回仓库页选分组。
+          </div>
+          <div class="table-wrap">
+            <table class="table table-hover mb-0">
+              <thead class="table-light">
+                <tr><th>分组名称</th><th>包含渠道</th><th>状态</th><th></th></tr>
+              </thead>
+              <tbody id="groups-body">
+                <tr><td colspan="4" class="text-secondary">加载中…</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="panel mb-3">
+          <div class="panel-header">
+            <h2>渠道列表</h2>
+            <button class="btn btn-sm btn-primary" id="btn-add-channel" type="button">
+              <i class="bi bi-plus-lg"></i> 添加渠道
+            </button>
+          </div>
+          <div class="table-wrap">
+            <table class="table table-hover mb-0">
+              <thead class="table-light">
+                <tr>
+                  <th>名称</th>
+                  <th>类型</th>
+                  <th>目标</th>
+                  <th>状态</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="channels-body">
+                <tr><td colspan="5" class="text-secondary">加载中…</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-header">
+            <h2>消息模板</h2>
+            <button type="button" class="btn btn-sm btn-primary" id="btn-save-template">保存模板</button>
+          </div>
+          <div class="p-3">
+            <label class="form-label" for="msg-template">正文（支持变量）</label>
+            <textarea class="form-control mono" id="msg-template" rows="6" spellcheck="false"></textarea>
+            <div class="form-text mt-2" id="template-vars"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal fade" id="groupModal" tabindex="-1" aria-hidden="true">
+      <div class="modal-dialog">
+        <form class="modal-content" id="group-form">
+          <div class="modal-header">
+            <h5 class="modal-title">添加 / 编辑 Webhook 分组</h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+          </div>
+          <div class="modal-body">
+            <input type="hidden" name="id" />
+            <div class="mb-3">
+              <label class="form-label">分组名称</label>
+              <input class="form-control" name="name" required placeholder="后端研发群" />
+            </div>
+            <div class="mb-3">
+              <label class="form-label">包含渠道</label>
+              <div id="group-channel-options" class="border rounded p-3"></div>
+              <div class="form-text">一个分组可以包含多个渠道，审查完成后依次推送。</div>
+            </div>
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" name="enabled" id="group-enabled" checked />
+              <label class="form-check-label" for="group-enabled">启用</label>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">取消</button>
+            <button type="submit" class="btn btn-primary">保存</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <div class="modal fade" id="channelModal" tabindex="-1" aria-hidden="true">
+      <div class="modal-dialog">
+        <form class="modal-content" id="channel-form">
+          <div class="modal-header">
+            <h5 class="modal-title">添加 / 编辑渠道</h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+          </div>
+          <div class="modal-body">
+            <input type="hidden" name="id" />
+            <div class="mb-3">
+              <label class="form-label">名称</label>
+              <input class="form-control" name="name" required placeholder="研发群飞书" />
+            </div>
+            <div class="mb-3">
+              <label class="form-label">类型</label>
+              <select class="form-select" name="kind" required>
+                <option value="feishu">飞书机器人 Webhook</option>
+                <option value="webhook">通用 Webhook（JSON POST）</option>
+              </select>
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Webhook URL</label>
+              <input class="form-control" name="target" placeholder="https://open.feishu.cn/open-apis/bot/v2/hook/..." />
+              <div class="form-text">编辑时留空表示不修改已保存的 URL。</div>
+            </div>
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" name="enabled" id="ch-enabled" checked />
+              <label class="form-check-label" for="ch-enabled">启用</label>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">取消</button>
+            <button type="submit" class="btn btn-primary">保存</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="js/app.js"></script>
+    <script>
+      CR.mountShell("notifications", "通知渠道");
+      const kindLabel = { feishu: "飞书", webhook: "通用 Webhook" };
+      let channels = [];
+      let groups = [];
+      const channelModal = new bootstrap.Modal(document.getElementById("channelModal"));
+      const groupModal = new bootstrap.Modal(document.getElementById("groupModal"));
+      const channelForm = document.getElementById("channel-form");
+      const groupForm = document.getElementById("group-form");
+
+      function renderChannelOptions(selected) {
+        const sel = new Set(selected || []);
+        const box = document.getElementById("group-channel-options");
+        if (!channels.length) {
+          box.innerHTML = `<div class="text-secondary">请先添加渠道</div>`;
+          return;
+        }
+        box.innerHTML = channels
+          .map(
+            (c) => `<div class="form-check">
+              <input class="form-check-input" type="checkbox" name="channel_ids" value="${CR.escapeHtml(c.id)}"
+                id="group-${CR.escapeHtml(c.id)}" ${sel.has(c.id) ? "checked" : ""} />
+              <label class="form-check-label" for="group-${CR.escapeHtml(c.id)}">${CR.escapeHtml(c.name)}</label>
+            </div>`
+          )
+          .join("");
+      }
+
+      function render() {
+        const channelMap = Object.fromEntries(channels.map((c) => [c.id, c]));
+        document.getElementById("groups-body").innerHTML =
+          groups
+            .map(
+              (g) => `<tr>
+              <td>${CR.escapeHtml(g.name)}</td>
+              <td>${(g.channel_ids || [])
+                .map((id) => channelMap[id])
+                .filter(Boolean)
+                .map((c) => `<span class="badge text-bg-light border me-1">${CR.escapeHtml(c.name)}</span>`)
+                .join("") || '<span class="text-secondary">无渠道</span>'}</td>
+              <td>${g.enabled ? '<span class="badge text-bg-success">启用</span>' : '<span class="badge text-bg-secondary">停用</span>'}</td>
+              <td class="text-end text-nowrap">
+                <button class="btn btn-sm btn-outline-secondary edit-group" type="button" data-id="${CR.escapeHtml(g.id)}">编辑</button>
+                <button class="btn btn-sm btn-outline-danger del-group" type="button" data-id="${CR.escapeHtml(g.id)}" data-name="${CR.escapeHtml(g.name)}">删除</button>
+              </td>
+            </tr>`
+            )
+            .join("") || `<tr><td colspan="4" class="text-secondary">还没有分组，先加渠道再加分组。</td></tr>`;
+
+        document.getElementById("channels-body").innerHTML =
+          channels
+            .map(
+              (c) => `<tr>
+              <td>${CR.escapeHtml(c.name)}</td>
+              <td>${CR.escapeHtml(kindLabel[c.kind] || c.kind)}</td>
+              <td class="mono text-truncate" style="max-width: 280px">${CR.escapeHtml(c.target_masked || "")}</td>
+              <td>${c.enabled ? '<span class="badge text-bg-success">启用</span>' : '<span class="badge text-bg-secondary">停用</span>'}</td>
+              <td class="text-end text-nowrap">
+                <button class="btn btn-sm btn-outline-primary test-ch" type="button" data-id="${CR.escapeHtml(c.id)}">测试</button>
+                <button class="btn btn-sm btn-outline-secondary edit-ch" type="button" data-id="${CR.escapeHtml(c.id)}">编辑</button>
+                <button class="btn btn-sm btn-outline-danger del-ch" type="button" data-id="${CR.escapeHtml(c.id)}" data-name="${CR.escapeHtml(c.name)}">删除</button>
+              </td>
+            </tr>`
+            )
+            .join("") || `<tr><td colspan="5" class="text-secondary">还没有渠道，点右上角添加飞书机器人 Webhook。</td></tr>`;
+
+        document.querySelectorAll(".edit-group").forEach((el) => {
+          el.addEventListener("click", () => {
+            const g = groups.find((x) => x.id === el.dataset.id);
+            if (!g) return;
+            groupForm.reset();
+            groupForm.elements.id.value = g.id;
+            groupForm.elements.name.value = g.name;
+            groupForm.elements.enabled.checked = !!g.enabled;
+            renderChannelOptions(g.channel_ids || []);
+            groupModal.show();
+          });
+        });
+        document.querySelectorAll(".del-group").forEach((el) => {
+          el.addEventListener("click", async () => {
+            if (!confirm(`删除分组「${el.dataset.name}」？绑定该分组的仓库通知会被关闭。`)) return;
+            try {
+              await CR.apiSend("DELETE", `/api/notifications/groups/${el.dataset.id}`);
+              CR.showToast("分组已删除", "success");
+              await load();
+            } catch (err) {
+              CR.showToast(String(err.message || err), "danger");
+            }
+          });
+        });
+        document.querySelectorAll(".edit-ch").forEach((el) => {
+          el.addEventListener("click", () => {
+            const c = channels.find((x) => x.id === el.dataset.id);
+            if (!c) return;
+            channelForm.reset();
+            channelForm.elements.id.value = c.id;
+            channelForm.elements.name.value = c.name;
+            channelForm.elements.kind.value = c.kind;
+            channelForm.elements.target.required = false;
+            channelForm.elements.target.placeholder = "留空表示不修改";
+            channelForm.elements.enabled.checked = !!c.enabled;
+            channelModal.show();
+          });
+        });
+        document.querySelectorAll(".del-ch").forEach((el) => {
+          el.addEventListener("click", async () => {
+            if (!confirm(`删除渠道「${el.dataset.name}」？`)) return;
+            try {
+              await CR.apiSend("DELETE", `/api/notifications/channels/${el.dataset.id}`);
+              CR.showToast("渠道已删除", "success");
+              await load();
+            } catch (err) {
+              CR.showToast(String(err.message || err), "danger");
+            }
+          });
+        });
+        document.querySelectorAll(".test-ch").forEach((el) => {
+          el.addEventListener("click", async () => {
+            el.disabled = true;
+            try {
+              await CR.apiSend("POST", `/api/notifications/channels/${el.dataset.id}/test`);
+              CR.showToast("测试消息已发送，请到飞书群查看", "success");
+            } catch (err) {
+              CR.showToast(String(err.message || err), "danger");
+            } finally {
+              el.disabled = false;
+            }
+          });
+        });
+      }
+
+      async function load() {
+        const data = await CR.apiGet("/api/notifications");
+        channels = data.channels || [];
+        groups = data.groups || [];
+        document.getElementById("msg-template").value = data.template || "";
+        document.getElementById("template-vars").innerHTML =
+          "可用变量：" +
+          (data.variables || [])
+            .map((v) => `<code class="me-2">${CR.escapeHtml(v)}</code>`)
+            .join("");
+        render();
+      }
+
+      load().catch((e) => CR.showToast(String(e.message || e), "danger"));
+
+      document.getElementById("btn-add-channel").addEventListener("click", () => {
+        channelForm.reset();
+        channelForm.elements.id.value = "";
+        channelForm.elements.target.required = true;
+        channelForm.elements.target.placeholder = "https://open.feishu.cn/open-apis/bot/v2/hook/...";
+        channelForm.elements.enabled.checked = true;
+        channelModal.show();
+      });
+
+      document.getElementById("btn-add-group").addEventListener("click", () => {
+        groupForm.reset();
+        groupForm.elements.id.value = "";
+        groupForm.elements.enabled.checked = true;
+        renderChannelOptions([]);
+        groupModal.show();
+      });
+
+      channelForm.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const fd = new FormData(e.target);
+        try {
+          await CR.apiSend("POST", "/api/notifications/channels", {
+            id: fd.get("id") || "",
+            name: fd.get("name"),
+            kind: fd.get("kind"),
+            target: fd.get("target") || "",
+            enabled: !!fd.get("enabled"),
+          });
+          channelModal.hide();
+          CR.showToast("渠道已保存", "success");
+          await load();
+          if (!groups.length) {
+            CR.showToast("下一步：把渠道打包成一个「Webhook 分组」，仓库才能选到它", "success");
+          }
+        } catch (err) {
+          CR.showToast(String(err.message || err), "danger");
+        }
+      });
+
+      groupForm.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const fd = new FormData(e.target);
+        const channelIds = fd.getAll("channel_ids");
+        if (!channelIds.length) {
+          CR.showToast("请至少选择一个通知渠道", "danger");
+          return;
+        }
+        try {
+          await CR.apiSend("POST", "/api/notifications/groups", {
+            id: fd.get("id") || "",
+            name: fd.get("name"),
+            channel_ids: channelIds,
+            enabled: !!fd.get("enabled"),
+          });
+          groupModal.hide();
+          CR.showToast("分组已保存", "success");
+          await load();
+        } catch (err) {
+          CR.showToast(String(err.message || err), "danger");
+        }
+      });
+
+      document.getElementById("btn-save-template").addEventListener("click", async () => {
+        try {
+          await CR.apiSend("PUT", "/api/notifications/template", {
+            template: document.getElementById("msg-template").value,
+          });
+          CR.showToast("消息模板已保存", "success");
+        } catch (err) {
+          CR.showToast(String(err.message || err), "danger");
+        }
+      });
+    </script>
+  </body>
+</html>

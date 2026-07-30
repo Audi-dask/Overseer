@@ -1,0 +1,10 @@
+data/
+*.db
+/tmp/
+test-go/
+open-code-review/
+data/workspaces/
+.env
+参考/
+
+AGENTS.md

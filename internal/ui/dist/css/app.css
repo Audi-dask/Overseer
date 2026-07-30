@@ -1,0 +1,276 @@
+:root {
+  --sidebar-width: 240px;
+  --sidebar-bg: #1e293b;
+  --sidebar-text: #cbd5e1;
+  --sidebar-active: #38bdf8;
+  --page-bg: #f1f5f9;
+}
+
+body {
+  background: var(--page-bg);
+  min-height: 100vh;
+}
+
+.app-shell {
+  display: flex;
+  min-height: 100vh;
+}
+
+.sidebar {
+  width: var(--sidebar-width);
+  flex-shrink: 0;
+  background: var(--sidebar-bg);
+  color: var(--sidebar-text);
+  display: flex;
+  flex-direction: column;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+}
+
+.sidebar-brand {
+  padding: 1.25rem 1rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.sidebar-brand .brand-name {
+  color: #fff;
+  font-weight: 700;
+  font-size: 1.05rem;
+  letter-spacing: 0.02em;
+}
+
+.sidebar-brand .brand-name i {
+  color: var(--sidebar-active);
+  margin-right: 0.25rem;
+}
+}
+
+.sidebar-brand .brand-sub {
+  font-size: 0.75rem;
+  color: #94a3b8;
+  margin-top: 0.2rem;
+}
+
+.sidebar-nav {
+  padding: 0.75rem 0.5rem;
+  flex: 1;
+}
+
+.sidebar-nav .nav-link {
+  color: var(--sidebar-text);
+  border-radius: 0.4rem;
+  padding: 0.55rem 0.75rem;
+  margin-bottom: 0.15rem;
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  font-size: 0.92rem;
+}
+
+.sidebar-nav .nav-link:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: #fff;
+}
+
+.sidebar-nav .nav-link.active {
+  background: rgba(56, 189, 248, 0.15);
+  color: var(--sidebar-active);
+  font-weight: 600;
+}
+
+.sidebar-nav .nav-link.disabled {
+  opacity: 0.45;
+  pointer-events: auto;
+  cursor: not-allowed;
+  color: #94a3b8;
+}
+
+.sidebar-nav .nav-link.disabled:hover {
+  background: transparent;
+  color: #94a3b8;
+}
+
+.sidebar-footer {
+  padding: 0.75rem 1rem 1rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  font-size: 0.75rem;
+  color: #64748b;
+}
+
+.main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.topbar {
+  background: #fff;
+  border-bottom: 1px solid #e2e8f0;
+  padding: 0.85rem 1.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.topbar h1 {
+  font-size: 1.15rem;
+  font-weight: 650;
+  margin: 0;
+  color: #0f172a;
+}
+
+.content {
+  padding: 1.25rem 1.5rem 2rem;
+}
+
+.boundary-banner {
+  border-left: 3px solid #0ea5e9;
+  background: #e0f2fe;
+  color: #0c4a6e;
+  padding: 0.75rem 1rem;
+  border-radius: 0.35rem;
+  font-size: 0.875rem;
+  margin-bottom: 1.25rem;
+}
+
+.stat-card {
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 0.5rem;
+  padding: 1rem 1.15rem;
+  height: 100%;
+}
+
+.stat-card .label {
+  font-size: 0.8rem;
+  color: #64748b;
+  margin-bottom: 0.35rem;
+}
+
+.stat-card .value {
+  font-size: 1.6rem;
+  font-weight: 700;
+  color: #0f172a;
+  line-height: 1.2;
+}
+
+.stat-card .hint {
+  font-size: 0.75rem;
+  color: #94a3b8;
+  margin-top: 0.35rem;
+}
+
+.panel {
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 0.5rem;
+  overflow: hidden;
+}
+
+.panel-header {
+  padding: 0.85rem 1rem;
+  border-bottom: 1px solid #e2e8f0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.panel-header h2 {
+  font-size: 0.95rem;
+  font-weight: 650;
+  margin: 0;
+}
+
+.table-wrap {
+  overflow-x: auto;
+}
+
+.table > :not(caption) > * > * {
+  padding: 0.7rem 1rem;
+  vertical-align: middle;
+}
+
+/* 兜底：未单独定义的状态也要有可读底色。
+   同时覆盖 --bs-badge-color，否则 Bootstrap 的 .badge 会把文字刷成白色。 */
+.badge[class*="badge-status-"] {
+  --bs-badge-color: #334155;
+  background: #f1f5f9;
+  color: #334155;
+  border: 1px solid #e2e8f0;
+}
+
+/* 绿：审查成功 / 实例已连接 / webhook 已配置 */
+.badge.badge-status-success,
+.badge.badge-status-connected,
+.badge.badge-status-ok {
+  --bs-badge-color: #166534;
+  background: #dcfce7;
+  color: #166534;
+  border-color: #bbf7d0;
+}
+
+/* 红：审查失败 */
+.badge.badge-status-failed {
+  --bs-badge-color: #991b1b;
+  background: #fee2e2;
+  color: #991b1b;
+  border-color: #fecaca;
+}
+
+/* 蓝：进行中 */
+.badge.badge-status-running {
+  --bs-badge-color: #1e40af;
+  background: #dbeafe;
+  color: #1e40af;
+  border-color: #bfdbfe;
+}
+
+/* 黄：缺凭证 / webhook 配置中 */
+.badge.badge-status-need_cred,
+.badge.badge-status-pending {
+  --bs-badge-color: #92400e;
+  background: #fef3c7;
+  color: #92400e;
+  border-color: #fde68a;
+}
+
+/* 灰：跳过 / webhook 未配置 */
+.badge.badge-status-skipped,
+.badge.badge-status-none {
+  --bs-badge-color: #475569;
+  background: #f1f5f9;
+  color: #475569;
+  border-color: #e2e8f0;
+}
+
+.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.85em;
+}
+
+@media (max-width: 768px) {
+  .app-shell {
+    flex-direction: column;
+  }
+
+  .sidebar {
+    width: 100%;
+    height: auto;
+    position: relative;
+  }
+
+  .sidebar-nav {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem;
+  }
+
+  .sidebar-nav .nav-link {
+    margin-bottom: 0;
+  }
+}

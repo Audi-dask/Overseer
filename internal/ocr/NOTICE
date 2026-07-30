@@ -1,0 +1,6 @@
+# Vendored from Alibaba Open Code Review (https://github.com/alibaba/open-code-review)
+# Copyright Alibaba Group Holding Limited and contributors.
+# Licensed under the Apache License, Version 2.0.
+#
+# Source packages were copied into github.com/Audi-dask/Overseer/internal/ocr/ and import paths
+# rewritten to github.com/Audi-dask/Overseer/internal/ocr/*. Telemetry was replaced with a no-op stub.

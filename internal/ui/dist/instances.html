@@ -1,0 +1,462 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>实例 · Overseer</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" />
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet" />
+    <link href="css/app.css" rel="stylesheet" />
+  </head>
+  <body>
+    <div id="app" class="app-shell">
+      <div id="page-content" hidden>
+        <div class="boundary-banner">
+          注册 VCS 实例后，用 <strong>Group / 项目关键词</strong> 定向搜索并勾选导入，避免全量灌库。
+        </div>
+
+        <div class="panel">
+          <div class="panel-header">
+            <h2>已注册实例</h2>
+            <button class="btn btn-sm btn-primary" id="btn-add-instance" type="button">
+              <i class="bi bi-plus-lg"></i> 添加实例
+            </button>
+          </div>
+          <div class="table-wrap">
+            <table class="table table-hover mb-0">
+              <thead class="table-light">
+                <tr>
+                  <th>名称</th>
+                  <th>类型</th>
+                  <th>Base URL</th>
+                  <th>已导入</th>
+                  <th>凭证</th>
+                  <th>状态</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="instances-body">
+                <tr><td colspan="7" class="text-secondary">加载中…</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal fade" id="instanceModal" tabindex="-1" aria-hidden="true">
+      <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <form class="modal-content" id="instance-form">
+          <div class="modal-header">
+            <h5 class="modal-title" id="instance-modal-title">添加 GitLab 实例</h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+          </div>
+          <div class="modal-body">
+            <input type="hidden" name="edit_id" id="instance-edit-id" value="" />
+            <div class="mb-3">
+              <label class="form-label">名称</label>
+              <input class="form-control" name="name" required placeholder="公司 GitLab" />
+            </div>
+            <div class="mb-3">
+              <label class="form-label">类型</label>
+              <select class="form-select" name="type" required id="instance-type">
+                <option value="gitlab">GitLab</option>
+                <option value="github" disabled>GitHub（后续）</option>
+                <option value="gitea" disabled>Gitea（后续）</option>
+              </select>
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Base URL</label>
+              <input class="form-control" name="base_url" required placeholder="https://gitlab.example.com" />
+              <div class="form-text">私有部署填完整域名，不要带尾斜杠；GitLab.com 填 <code>https://gitlab.com</code>。</div>
+            </div>
+            <div class="mb-3">
+              <label class="form-label">访问令牌 / 凭证</label>
+              <input class="form-control" name="token" type="password" id="instance-token" placeholder="glpat-xxxxxxxx" autocomplete="off" />
+              <div class="form-text" id="instance-token-hint">服务端 AES 加密存储，保存后不会在 UI 回显明文。</div>
+            </div>
+            <div class="alert alert-light border small mb-0" id="token-help">
+              <div class="fw-semibold mb-1">GitLab Token 怎么建</div>
+              <ol class="mb-2 ps-3">
+                <li>打开 GitLab → <strong>偏好设置 / Preferences</strong> → <strong>Access Tokens</strong>（或管理员创建 Group / Project Access Token）。</li>
+                <li>名称随意，例如 <code>overseer</code>；过期时间按公司策略选择。</li>
+                <li>勾选权限（Scopes）后创建，把生成的 <code>glpat-…</code> 粘到上方。</li>
+              </ol>
+              <div class="fw-semibold mb-1">本服务需要哪些权限</div>
+              <div class="table-responsive">
+                <table class="table table-sm align-middle mb-2">
+                  <thead>
+                    <tr>
+                      <th>Scope</th>
+                      <th>说明</th>
+                      <th>本服务</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td><code>api</code></td>
+                      <td>API 完全读/写（含群组、项目等）</td>
+                      <td><span class="badge text-bg-success">必选</span> 搜仓库、配/删事件钩子、回填 MR 评论</td>
+                    </tr>
+                    <tr>
+                      <td><code>read_repository</code></td>
+                      <td>私有仓只读（Git-over-HTTP / Files API）</td>
+                      <td><span class="badge text-bg-primary">建议</span> Agent 拉取代码时用；私有仓强烈建议勾选</td>
+                    </tr>
+                    <tr>
+                      <td><code>read_api</code></td>
+                      <td>仅 API 只读</td>
+                      <td><span class="badge text-bg-secondary">不够</span> 无法建钩子、无法回填评论</td>
+                    </tr>
+                    <tr>
+                      <td><code>write_repository</code></td>
+                      <td>仓库读写（Git 推送）</td>
+                      <td><span class="badge text-bg-secondary">不需要</span> 服务不对仓库推送</td>
+                    </tr>
+                    <tr>
+                      <td><code>read_user</code> / <code>sudo</code></td>
+                      <td>用户资料 / 模拟其他用户</td>
+                      <td><span class="badge text-bg-secondary">不需要</span></td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              <div class="text-secondary mb-0">
+                推荐勾选：<strong><code>api</code> + <code>read_repository</code></strong>。
+                除事件钩子与 MR 评论外，服务对仓库保持只读。
+              </div>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">取消</button>
+            <button type="submit" class="btn btn-primary">保存</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <div class="modal fade" id="importModal" tabindex="-1" aria-hidden="true">
+      <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h5 class="modal-title">导入仓库 · <span id="import-instance-name"></span></h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+          </div>
+          <div class="modal-body">
+            <input type="hidden" id="import-instance-id" />
+            <div class="input-group mb-3">
+              <input class="form-control" id="import-query" placeholder="Group 名 / 路径 / 项目关键词，如 android 或 team/backend" />
+              <button class="btn btn-primary" type="button" id="btn-discover">搜索</button>
+            </div>
+            <div class="d-flex justify-content-between align-items-center mb-2">
+              <div class="form-check m-0">
+                <input class="form-check-input" type="checkbox" id="import-select-all" />
+                <label class="form-check-label" for="import-select-all">全选未导入</label>
+              </div>
+              <span class="text-secondary small" id="import-hint">输入关键词后搜索，最多返回 200 条候选</span>
+            </div>
+            <div class="table-wrap border rounded" style="max-height: 420px; overflow: auto">
+              <table class="table table-sm table-hover mb-0">
+                <thead class="table-light sticky-top">
+                  <tr>
+                    <th style="width: 2.5rem"></th>
+                    <th>仓库</th>
+                    <th>可见性</th>
+                    <th>状态</th>
+                  </tr>
+                </thead>
+                <tbody id="import-body">
+                  <tr><td colspan="4" class="text-secondary">等待搜索…</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <div class="modal-footer justify-content-between">
+            <button type="button" class="btn btn-outline-danger btn-sm" id="btn-purge">清理未开启 Review 的导入</button>
+            <div class="d-flex gap-2">
+              <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">关闭</button>
+              <button type="button" class="btn btn-primary" id="btn-import" disabled>导入选中</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="js/app.js"></script>
+    <script>
+      CR.mountShell("instances", "实例管理");
+
+      let importModal;
+      let candidates = [];
+
+      async function loadInstances() {
+        const list = await CR.apiGet("/api/instances");
+        const body = document.getElementById("instances-body");
+        if (!list.length) {
+          body.innerHTML = `<tr><td colspan="7" class="text-secondary">还没有实例，点右上角「添加实例」。</td></tr>`;
+          return;
+        }
+        body.innerHTML = list
+          .map(
+            (i) => `<tr>
+              <td>${CR.escapeHtml(i.name)}</td>
+              <td><span class="badge text-bg-light border text-uppercase">${CR.escapeHtml(i.type)}</span></td>
+              <td class="mono">${CR.escapeHtml(i.base_url)}</td>
+              <td>${i.repos}</td>
+              <td>${i.has_cred ? "已配置" : "未配置"}</td>
+              <td>${CR.statusBadge(i.status)}</td>
+              <td class="text-end text-nowrap">
+                <button class="btn btn-sm btn-outline-primary edit-btn" type="button"
+                  data-id="${CR.escapeHtml(i.id)}" data-name="${CR.escapeHtml(i.name)}"
+                  data-type="${CR.escapeHtml(i.type)}" data-url="${CR.escapeHtml(i.base_url)}">编辑</button>
+                <button class="btn btn-sm btn-primary import-btn" type="button"
+                  data-id="${CR.escapeHtml(i.id)}" data-name="${CR.escapeHtml(i.name)}">导入仓库</button>
+                <button class="btn btn-sm btn-outline-secondary refresh-btn" type="button" data-id="${CR.escapeHtml(i.id)}">刷新元数据</button>
+                <button class="btn btn-sm btn-outline-danger del-btn" type="button" data-id="${CR.escapeHtml(i.id)}" data-name="${CR.escapeHtml(i.name)}">删除</button>
+              </td>
+            </tr>`
+          )
+          .join("");
+
+        body.querySelectorAll(".import-btn").forEach((el) => {
+          el.addEventListener("click", () => openImport(el.dataset.id, el.dataset.name));
+        });
+
+        body.querySelectorAll(".edit-btn").forEach((el) => {
+          el.addEventListener("click", () => openEditInstance(el.dataset));
+        });
+
+        body.querySelectorAll(".refresh-btn").forEach((el) => {
+          el.addEventListener("click", async () => {
+            el.disabled = true;
+            try {
+              const res = await CR.apiSend("POST", `/api/instances/${el.dataset.id}/sync`);
+              CR.showToast(res.message || `已刷新 ${res.synced} 个已导入仓库`, "success");
+              await loadInstances();
+            } catch (err) {
+              CR.showToast(String(err.message || err), "danger");
+            } finally {
+              el.disabled = false;
+            }
+          });
+        });
+
+        body.querySelectorAll(".del-btn").forEach((el) => {
+          el.addEventListener("click", async () => {
+            if (!confirm(`删除实例「${el.dataset.name}」？其仓库配置会一并清除，已配置的事件钩子会尝试回收。`)) return;
+            el.disabled = true;
+            try {
+              await CR.apiSend("DELETE", `/api/instances/${el.dataset.id}`);
+              CR.showToast("实例已删除", "success");
+              await loadInstances();
+            } catch (err) {
+              CR.showToast(String(err.message || err), "danger");
+              el.disabled = false;
+            }
+          });
+        });
+      }
+
+      function openAddInstance() {
+        const form = document.getElementById("instance-form");
+        form.reset();
+        document.getElementById("instance-edit-id").value = "";
+        document.getElementById("instance-modal-title").textContent = "添加 GitLab 实例";
+        document.getElementById("instance-type").disabled = false;
+        const token = document.getElementById("instance-token");
+        token.required = true;
+        token.placeholder = "glpat-xxxxxxxx";
+        document.getElementById("instance-token-hint").textContent =
+          "服务端 AES 加密存储，保存后不会在 UI 回显明文。";
+        bootstrap.Modal.getOrCreateInstance(document.getElementById("instanceModal")).show();
+      }
+
+      function openEditInstance(data) {
+        const form = document.getElementById("instance-form");
+        form.reset();
+        document.getElementById("instance-edit-id").value = data.id || "";
+        document.getElementById("instance-modal-title").textContent = "编辑实例";
+        form.elements.name.value = data.name || "";
+        form.elements.type.value = data.type || "gitlab";
+        document.getElementById("instance-type").disabled = true;
+        form.elements.base_url.value = data.url || "";
+        const token = document.getElementById("instance-token");
+        token.required = false;
+        token.value = "";
+        token.placeholder = "留空则保留原 Token；填写则替换";
+        document.getElementById("instance-token-hint").textContent =
+          "留空保留原 Token。填写新 Token 后会加密覆盖，明文不会回显。";
+        bootstrap.Modal.getOrCreateInstance(document.getElementById("instanceModal")).show();
+      }
+
+      function openImport(id, name) {
+        document.getElementById("import-instance-id").value = id;
+        document.getElementById("import-instance-name").textContent = name;
+        document.getElementById("import-query").value = "";
+        document.getElementById("import-select-all").checked = false;
+        candidates = [];
+        document.getElementById("import-body").innerHTML =
+          `<tr><td colspan="4" class="text-secondary">输入 Group 或项目关键词后点搜索</td></tr>`;
+        document.getElementById("import-hint").textContent = "输入关键词后搜索，最多返回 200 条候选";
+        document.getElementById("btn-import").disabled = true;
+        importModal.show();
+        setTimeout(() => document.getElementById("import-query").focus(), 200);
+      }
+
+      function selectedIDs() {
+        return [...document.querySelectorAll(".cand-check:checked")].map((el) => el.value);
+      }
+
+      function updateImportBtn() {
+        const n = selectedIDs().length;
+        const btn = document.getElementById("btn-import");
+        btn.disabled = n === 0;
+        btn.textContent = n ? `导入选中（${n}）` : "导入选中";
+      }
+
+      function renderCandidates() {
+        const body = document.getElementById("import-body");
+        if (!candidates.length) {
+          body.innerHTML = `<tr><td colspan="4" class="text-secondary">无匹配结果</td></tr>`;
+          updateImportBtn();
+          return;
+        }
+        body.innerHTML = candidates
+          .map((c) => {
+            const disabled = c.imported ? "disabled" : "";
+            const badge = c.imported
+              ? '<span class="badge text-bg-light border">已导入</span>'
+              : '<span class="text-secondary">未导入</span>';
+            return `<tr>
+              <td><input class="form-check-input cand-check" type="checkbox" value="${CR.escapeHtml(c.external_id)}" ${disabled} /></td>
+              <td class="mono">${CR.escapeHtml(c.full_name)}</td>
+              <td>${c.private ? "私有" : "公开"}</td>
+              <td>${badge}</td>
+            </tr>`;
+          })
+          .join("");
+        body.querySelectorAll(".cand-check").forEach((el) => el.addEventListener("change", updateImportBtn));
+        updateImportBtn();
+      }
+
+      async function runDiscover() {
+        const id = document.getElementById("import-instance-id").value;
+        const q = document.getElementById("import-query").value.trim();
+        if (!q) {
+          CR.showToast("请输入 Group / 项目关键词", "danger");
+          return;
+        }
+        const btn = document.getElementById("btn-discover");
+        btn.disabled = true;
+        btn.textContent = "搜索中…";
+        document.getElementById("import-body").innerHTML =
+          `<tr><td colspan="4" class="text-secondary">正在搜索「${CR.escapeHtml(q)}」…</td></tr>`;
+        try {
+          const res = await CR.apiSend("POST", `/api/instances/${id}/discover`, { q });
+          candidates = res.candidates || [];
+          document.getElementById("import-hint").textContent =
+            `匹配 ${res.count || 0} 个（已导入会标出，不可重复勾选）`;
+          document.getElementById("import-select-all").checked = false;
+          renderCandidates();
+        } catch (err) {
+          document.getElementById("import-body").innerHTML =
+            `<tr><td colspan="4" class="text-danger">${CR.escapeHtml(err.message || err)}</td></tr>`;
+          CR.showToast(String(err.message || err), "danger");
+        } finally {
+          btn.disabled = false;
+          btn.textContent = "搜索";
+        }
+      }
+
+      loadInstances().catch((e) => {
+        document.getElementById("instances-body").innerHTML =
+          `<tr><td colspan="7" class="text-danger">加载失败：${CR.escapeHtml(e.message || e)}</td></tr>`;
+      });
+
+      document.addEventListener("DOMContentLoaded", () => {
+        importModal = new bootstrap.Modal(document.getElementById("importModal"));
+      });
+      importModal = new bootstrap.Modal(document.getElementById("importModal"));
+
+      document.getElementById("btn-discover").addEventListener("click", runDiscover);
+      document.getElementById("import-query").addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          runDiscover();
+        }
+      });
+
+      document.getElementById("import-select-all").addEventListener("change", (e) => {
+        document.querySelectorAll(".cand-check:not(:disabled)").forEach((el) => {
+          el.checked = e.target.checked;
+        });
+        updateImportBtn();
+      });
+
+      document.getElementById("btn-import").addEventListener("click", async () => {
+        const id = document.getElementById("import-instance-id").value;
+        const ids = selectedIDs();
+        if (!ids.length) return;
+        const btn = document.getElementById("btn-import");
+        btn.disabled = true;
+        try {
+          const res = await CR.apiSend("POST", `/api/instances/${id}/import`, { external_ids: ids });
+          CR.showToast(`已导入 ${res.imported} 个，当前共 ${res.total} 个`, "success");
+          await runDiscover();
+          await loadInstances();
+        } catch (err) {
+          CR.showToast(String(err.message || err), "danger");
+          updateImportBtn();
+        }
+      });
+
+      document.getElementById("btn-purge").addEventListener("click", async () => {
+        const id = document.getElementById("import-instance-id").value;
+        if (!confirm("删除该实例下所有「未开启 Review」的已导入仓库？已开启的不受影响。")) return;
+        try {
+          const res = await CR.apiSend("POST", `/api/instances/${id}/purge-inactive`);
+          CR.showToast(`已清理 ${res.deleted} 个未开启仓库`, "success");
+          await loadInstances();
+          if (document.getElementById("import-query").value.trim()) await runDiscover();
+        } catch (err) {
+          CR.showToast(String(err.message || err), "danger");
+        }
+      });
+
+      document.getElementById("btn-add-instance").addEventListener("click", openAddInstance);
+
+      document.getElementById("instance-form").addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const fd = new FormData(e.target);
+        const editId = (fd.get("edit_id") || "").toString().trim();
+        const token = (fd.get("token") || "").toString().trim();
+        try {
+          if (editId) {
+            const payload = {
+              name: fd.get("name"),
+              base_url: fd.get("base_url"),
+            };
+            if (token) payload.token = token;
+            await CR.apiSend("PUT", `/api/instances/${editId}`, payload);
+            CR.showToast(token ? "实例已更新（Token 已替换）" : "实例已更新", "success");
+          } else {
+            await CR.apiSend("POST", "/api/instances", {
+              name: fd.get("name"),
+              type: fd.get("type"),
+              base_url: fd.get("base_url"),
+              token,
+            });
+            CR.showToast("实例已保存，点「导入仓库」按关键词接入", "success");
+          }
+          bootstrap.Modal.getInstance(document.getElementById("instanceModal"))?.hide();
+          e.target.reset();
+          document.getElementById("instance-type").disabled = false;
+          await loadInstances();
+        } catch (err) {
+          CR.showToast(String(err.message || err), "danger");
+        }
+      });
+    </script>
+  </body>
+</html>

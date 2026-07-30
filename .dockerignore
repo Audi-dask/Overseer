@@ -1,0 +1,13 @@
+.git
+.gitignore
+data/
+*.db
+test-go/
+open-code-review/
+tmp/
+**/*_test.go
+**/.DS_Store
+README.md
+AGENTS.md
+LICENSE
+Todo.md

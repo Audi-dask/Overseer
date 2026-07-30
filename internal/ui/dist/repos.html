@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>仓库 · Overseer</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" />
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet" />
+    <link href="css/app.css" rel="stylesheet" />
+  </head>
+  <body>
+    <div id="app" class="app-shell">
+      <div id="page-content" hidden>
+        <div class="boundary-banner">
+          开启 Review 自动配钩子；每仓库选 MR 或 Push 触发来源。Push 回填 Commit 评论，MR 回填 MR 评论。
+        </div>
+
+        <div class="panel">
+          <div class="panel-header">
+            <h2>仓库列表 <span class="text-secondary fs-6 fw-normal" id="repo-count"></span></h2>
+            <div class="d-flex gap-2 align-items-center">
+              <input class="form-control form-control-sm" id="filter-name" type="search"
+                placeholder="搜索仓库名…" style="width: auto; min-width: 200px" />
+              <div class="form-check form-switch m-0 ms-1 text-nowrap">
+                <input class="form-check-input" type="checkbox" role="switch" id="filter-enabled" />
+                <label class="form-check-label small" for="filter-enabled">只看已开启</label>
+              </div>
+              <select class="form-select form-select-sm" id="filter-instance" style="width: auto; min-width: 180px">
+                <option value="">全部实例</option>
+              </select>
+              <button class="btn btn-sm btn-outline-secondary" id="btn-refresh" type="button">
+                <i class="bi bi-arrow-clockwise"></i> 刷新已导入
+              </button>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table class="table table-hover mb-0">
+              <thead class="table-light">
+                <tr>
+                  <th>仓库</th>
+                  <th>实例</th>
+                  <th>可见性</th>
+                  <th>事件钩子</th>
+                  <th>开启AI审查</th>
+                  <th>触发来源</th>
+                  <th>启用通知</th>
+                </tr>
+              </thead>
+              <tbody id="repos-body">
+                <tr><td colspan="7" class="text-secondary">加载中…</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal fade" id="groupPickModal" tabindex="-1" aria-hidden="true">
+      <div class="modal-dialog">
+        <form class="modal-content" id="group-pick-form">
+          <div class="modal-header">
+            <h5 class="modal-title">选择通知分组</h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+          </div>
+          <div class="modal-body">
+            <p class="text-secondary small mb-3">仓库：<code id="group-pick-repo" class="mono"></code></p>
+            <input type="hidden" id="group-pick-repo-id" />
+            <div class="mb-0">
+              <label class="form-label">Webhook 分组</label>
+              <select class="form-select" id="group-pick-select" required>
+                <option value="">请选择分组</option>
+              </select>
+              <div class="form-text">审查完成后，MR/PR 链接将推送到该分组下的渠道。</div>
+              <div class="alert alert-warning mt-3 mb-0 d-none" id="group-pick-empty">
+                还没有可用的 Webhook 分组。请先到 <a href="notifications.html" class="alert-link">通知渠道</a>
+                页添加渠道，再把渠道打包成一个<strong>分组</strong>；分组才是仓库这里可选的对象。
+              </div>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-outline-secondary" id="btn-clear-group">清空</button>
+            <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">取消</button>
+            <button type="submit" class="btn btn-primary" id="btn-group-confirm">确定</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="js/app.js"></script>
+    <script>
+      CR.mountShell("repos", "仓库接入");
+      let allRepos = [];
+      let notificationGroups = [];
+      let groupPickModal;
+
+      function groupName(id) {
+        const g = notificationGroups.find((x) => x.id === id);
+        return g ? g.name : "";
+      }
+
+      function renderTriggerModeCell(r) {
+        const mode = r.trigger_mode || "mr";
+        const disabled = r.review_enabled ? "" : "disabled";
+        const mk = (value, label, title) =>
+          `<label class="form-check form-check-inline m-0 me-2" title="${title}">
+            <input class="form-check-input trigger-mode-radio" type="radio" name="trigger-${CR.escapeHtml(r.id)}"
+              data-id="${CR.escapeHtml(r.id)}" value="${value}"
+              ${mode === value ? "checked" : ""} ${disabled} />
+            <span class="form-check-label small">${label}</span>
+          </label>`;
+        return `<div class="text-nowrap">
+          ${mk("mr", "MR", "监听 merge_request 事件")}
+          ${mk("push", "Push", "监听 push 事件")}
+        </div>`;
+      }
+
+      function renderNotifyCell(r) {
+        const switchHtml = `<div class="form-check form-switch m-0">
+          <input class="form-check-input notify-toggle" type="checkbox" role="switch"
+            data-id="${CR.escapeHtml(r.id)}"
+            ${r.notify_enabled ? "checked" : ""}
+            ${r.review_enabled ? "" : "disabled"}
+            title="${r.review_enabled ? "审查完成后推送通知" : "需先开启 Review"}" />
+        </div>`;
+        if (!r.review_enabled || !r.notify_enabled) {
+          return switchHtml;
+        }
+        const name = groupName(r.notification_group_id);
+        const groupHtml = name
+          ? `<div class="small mt-1">
+              <span class="text-secondary">${CR.escapeHtml(name)}</span>
+              <button type="button" class="btn btn-link btn-sm p-0 ms-1 align-baseline group-pick-btn"
+                data-id="${CR.escapeHtml(r.id)}">变更</button>
+            </div>`
+          : `<div class="mt-1">
+              <button type="button" class="btn btn-sm btn-outline-primary py-0 px-1 group-pick-btn"
+                data-id="${CR.escapeHtml(r.id)}">选择分组</button>
+            </div>`;
+        return switchHtml + groupHtml;
+      }
+
+      async function openGroupPicker(repoId) {
+        const repo = allRepos.find((r) => r.id === repoId);
+        if (!repo) return;
+        document.getElementById("group-pick-repo-id").value = repo.id;
+        document.getElementById("group-pick-repo").textContent = repo.full_name;
+        const sel = document.getElementById("group-pick-select");
+        const empty = document.getElementById("group-pick-empty");
+        const confirmBtn = document.getElementById("btn-group-confirm");
+        sel.innerHTML = `<option value="">加载中…</option>`;
+        groupPickModal.show();
+        // Re-fetch so groups created in another tab show up without a page reload.
+        try {
+          const data = await CR.apiGet("/api/notifications");
+          notificationGroups = data.groups || [];
+        } catch (err) {
+          CR.showToast(String(err.message || err), "danger");
+        }
+        const usable = notificationGroups.filter((g) => g.enabled);
+        empty.classList.toggle("d-none", usable.length > 0);
+        confirmBtn.disabled = usable.length === 0;
+        sel.disabled = usable.length === 0;
+        sel.innerHTML =
+          `<option value="">请选择分组</option>` +
+          usable
+            .map(
+              (g) =>
+                `<option value="${CR.escapeHtml(g.id)}" ${repo.notification_group_id === g.id ? "selected" : ""}>${CR.escapeHtml(g.name)}</option>`
+            )
+            .join("");
+      }
+
+      async function saveNotify(repoId, enabled, groupId) {
+        const payload = { enabled };
+        if (groupId !== undefined) payload.notification_group_id = groupId;
+        const repo = await CR.apiSend("POST", `/api/repos/${repoId}/notify`, payload);
+        const idx = allRepos.findIndex((r) => r.id === repoId);
+        if (idx >= 0 && repo && repo.id) allRepos[idx] = repo;
+        return repo;
+      }
+
+      const MAX_ROWS = 200;
+
+      function renderRepos() {
+        const filter = document.getElementById("filter-instance").value;
+        const keyword = document.getElementById("filter-name").value.trim().toLowerCase();
+        const onlyEnabled = document.getElementById("filter-enabled").checked;
+        const matched = allRepos.filter(
+          (r) =>
+            (!filter || r.instance_id === filter) &&
+            (!keyword || r.full_name.toLowerCase().includes(keyword)) &&
+            (!onlyEnabled || r.review_enabled)
+        );
+        const rows = matched.slice(0, MAX_ROWS);
+        document.getElementById("repo-count").textContent =
+          matched.length > rows.length
+            ? `显示 ${rows.length} / ${matched.length}（共 ${allRepos.length}），请用搜索缩小范围`
+            : `${matched.length} 个（共 ${allRepos.length}）`;
+        document.getElementById("repos-body").innerHTML = rows
+          .map(
+            (r) => `<tr>
+              <td class="mono">${CR.escapeHtml(r.full_name)}</td>
+              <td>${CR.escapeHtml(r.instance_name)}</td>
+              <td>${r.private ? "私有" : "公开"}</td>
+              <td>${CR.statusBadge(r.webhook)}</td>
+              <td>
+                <div class="form-check form-switch m-0">
+                  <input class="form-check-input review-toggle" type="checkbox" role="switch"
+                    data-id="${CR.escapeHtml(r.id)}" ${r.review_enabled ? "checked" : ""} />
+                </div>
+              </td>
+              <td>${renderTriggerModeCell(r)}</td>
+              <td>${renderNotifyCell(r)}</td>
+            </tr>`
+          )
+          .join("") || `<tr><td colspan="7" class="text-secondary">无匹配仓库</td></tr>`;
+
+        document.querySelectorAll(".review-toggle").forEach((el) => {
+          el.addEventListener("change", async () => {
+            const on = el.checked;
+            const id = el.dataset.id;
+            el.disabled = true;
+            try {
+              const updated = await CR.apiSend("POST", `/api/repos/${id}/review`, { enabled: on });
+              const repo = updated.repo || updated;
+              const idx = allRepos.findIndex((r) => r.id === id);
+              if (idx >= 0 && repo && repo.id) allRepos[idx] = repo;
+              CR.showToast(
+                updated.warning
+                  ? updated.warning
+                  : on
+                    ? "已开启：事件钩子已配置"
+                    : "已关闭：事件钩子已回收",
+                updated.warning ? "danger" : "success"
+              );
+            } catch (err) {
+              CR.showToast(String(err.message || err), "danger");
+              const repo = allRepos.find((r) => r.id === id);
+              if (repo) repo.review_enabled = !on;
+            }
+            renderRepos();
+          });
+        });
+
+        document.querySelectorAll(".trigger-mode-radio").forEach((el) => {
+          el.addEventListener("change", async () => {
+            if (!el.checked) return;
+            const id = el.dataset.id;
+            const mode = el.value;
+            const radios = document.querySelectorAll(`.trigger-mode-radio[data-id="${CSS.escape(id)}"]`);
+            radios.forEach((b) => {
+              b.disabled = true;
+            });
+            try {
+              const res = await CR.apiSend("PUT", `/api/repos/${id}/trigger-mode`, {
+                trigger_mode: mode,
+              });
+              const repo = res.repo || res;
+              const idx = allRepos.findIndex((r) => r.id === id);
+              if (idx >= 0 && repo && repo.id) allRepos[idx] = repo;
+              CR.showToast(
+                res.warning
+                  ? res.warning
+                  : mode === "mr"
+                    ? "已切换为 MR 阶段，钩子已更新"
+                    : "已切换为 Push 阶段，钩子已更新",
+                res.warning ? "danger" : "success"
+              );
+            } catch (err) {
+              CR.showToast(String(err.message || err), "danger");
+            }
+            renderRepos();
+          });
+        });
+
+        document.querySelectorAll(".notify-toggle").forEach((el) => {
+          el.addEventListener("change", async () => {
+            const on = el.checked;
+            const id = el.dataset.id;
+            el.disabled = true;
+            try {
+              await saveNotify(id, on, on ? undefined : "");
+              if (on) {
+                const repo = allRepos.find((r) => r.id === id);
+                if (repo && !repo.notification_group_id) {
+                  renderRepos();
+                  openGroupPicker(id);
+                  return;
+                }
+                CR.showToast("已启用通知", "success");
+              } else {
+                CR.showToast("已关闭通知", "success");
+              }
+            } catch (err) {
+              CR.showToast(String(err.message || err), "danger");
+            }
+            renderRepos();
+          });
+        });
+
+        document.querySelectorAll(".group-pick-btn").forEach((el) => {
+          el.addEventListener("click", () => openGroupPicker(el.dataset.id));
+        });
+      }
+
+      (async () => {
+        const [repos, instances, notifications] = await Promise.all([
+          CR.apiGet("/api/repos"),
+          CR.apiGet("/api/instances"),
+          CR.apiGet("/api/notifications"),
+        ]);
+        allRepos = repos || [];
+        notificationGroups = notifications.groups || [];
+        if (!instances.length) {
+          CR.showToast("还没有实例，请先到「实例」页添加并用关键词导入仓库", "danger");
+        }
+        groupPickModal = new bootstrap.Modal(document.getElementById("groupPickModal"));
+
+        const sel = document.getElementById("filter-instance");
+        instances.forEach((i) => {
+          const opt = document.createElement("option");
+          opt.value = i.id;
+          opt.textContent = i.name;
+          sel.appendChild(opt);
+        });
+        sel.addEventListener("change", renderRepos);
+        document.getElementById("filter-name").addEventListener("input", renderRepos);
+        document.getElementById("filter-enabled").addEventListener("change", renderRepos);
+        document.getElementById("btn-refresh").addEventListener("click", async () => {
+          const target = sel.value || (instances[0] && instances[0].id);
+          if (!target) {
+            CR.showToast("没有可同步的实例", "danger");
+            return;
+          }
+          try {
+            const res = await CR.apiSend("POST", `/api/instances/${target}/sync`);
+            allRepos = await CR.apiGet("/api/repos");
+            renderRepos();
+            CR.showToast(res.message || `已刷新 ${res.synced} 个已导入仓库`, "success");
+          } catch (err) {
+            CR.showToast(String(err.message || err), "danger");
+          }
+        });
+
+        document.getElementById("group-pick-form").addEventListener("submit", async (e) => {
+          e.preventDefault();
+          const repoId = document.getElementById("group-pick-repo-id").value;
+          const groupId = document.getElementById("group-pick-select").value;
+          const group = notificationGroups.find((g) => g.id === groupId);
+          if (!group) {
+            CR.showToast("请选择分组", "danger");
+            return;
+          }
+          groupPickModal.hide();
+          try {
+            await saveNotify(repoId, true, groupId);
+            CR.showToast(`通知分组已设为「${group.name}」`, "success");
+          } catch (err) {
+            CR.showToast(String(err.message || err), "danger");
+          }
+          renderRepos();
+        });
+
+        document.getElementById("btn-clear-group").addEventListener("click", async () => {
+          const repoId = document.getElementById("group-pick-repo-id").value;
+          groupPickModal.hide();
+          try {
+            await saveNotify(repoId, false, "");
+            CR.showToast("已清空通知分组", "success");
+          } catch (err) {
+            CR.showToast(String(err.message || err), "danger");
+          }
+          renderRepos();
+        });
+
+        renderRepos();
+      })().catch((e) => CR.showToast(String(e), "danger"));
+    </script>
+  </body>
+</html>
