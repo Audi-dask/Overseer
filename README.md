@@ -17,8 +17,8 @@ Overseer connects to GitLab (more VCS providers planned), watches MR or Push eve
 ### Important
 
 - Set a **fixed** **`MASTER_KEY`** in `.env` before first run. It encrypts VCS tokens and LLM API keys. Changing it invalidates stored credentials — re-enter them in the admin UI.
-- Set the **callback Base URL** in the admin UI to the public address GitLab uses (e.g. `http://review.example.com`, or `https://…` if TLS terminates at your load balancer). Webhooks use `{base}/hooks/{instance_id}`.
-- If the container registry is private, run `docker login` against your registry before `docker compose pull`.
+- Overseer is an internal platform and **must not be exposed directly to the public internet**. If a webhook endpoint must be publicly accessible in exceptional circumstances, restrict access at the webhook ingress with an IP allowlist containing only the Git platform's outbound IP addresses.
+- Reviews send repository code and related context to the configured LLM service. For private or sensitive repositories, use an authorized enterprise service, a local model, or a provider that meets your data-compliance requirements.
 
 ### Features
 
@@ -46,7 +46,7 @@ cp .env.example .env
 3. (Optional) Override the image in `.env`:
 
 ```bash
-# OVERSEER_IMAGE=ccr.ccs.tencentyun.com/audi-dask/overseer:20260730-fix1
+OVERSEER_IMAGE=ccr.ccs.tencentyun.com/audi-dask/overseer:latest
 ```
 
 4. Start:
@@ -57,7 +57,7 @@ docker compose up -d
 docker compose logs -f overseer
 ```
 
-5. Open **`http://<server-ip>:8080/`** on your LAN/VPN for first-time admin setup (see [Public exposure](#public-exposure-en)).
+5. Open **`http://<server-ip>:8080/`** on your LAN/VPN for first-time admin setup. For public webhook exposure, see [`deploy/nginx/overseer.conf.example`](deploy/nginx/overseer.conf.example).
 
 Data persists in the **`overseer-data`** volume (`/data/overseer.db`, workspaces, review logs).
 
@@ -79,38 +79,10 @@ docker compose up -d
 | Callback Base URL | Admin → Settings; must be public to GitLab |
 | Webhook secret | Validated on incoming hooks (not the admin password) |
 
-Inside the container: `DB_PATH=/data/overseer.db`, `WORKSPACE_DIR=/data/workspaces`, `REVIEW_LOG_DIR=/data/reviewlogs`.
 
 ### Public exposure {#public-exposure-en}
 
-Expose **only** GitLab webhook callbacks on the public internet. Do **not** put `/api/auth/login`, the admin UI, or other `/api/*` routes on a public hostname.
-
-| Access | URL | Purpose |
-| --- | --- | --- |
-| Public | `http://review.example.com/hooks/{instance_id}` | GitLab `POST` webhooks only (nginx **:80** on origin; **443** at LB if used) |
-| Internal | `http://10.x.x.x:8080/` (VPN / LAN) | Login, settings, review UI |
-
-Set **Callback Base URL** to the URL GitLab reaches (often `https://review.example.com` when the LB terminates TLS). Open the admin UI at **`http://<server-ip>:8080/`** on your LAN/VPN only.
-
-Nginx on the origin listens on **port 80** and reverse-proxies to `http://127.0.0.1:8080`. Change `.env` `PORT` only if **8080** is already taken on that host.
-
-Example nginx config: [`deploy/nginx/overseer.conf.example`](deploy/nginx/overseer.conf.example)
-
-```nginx
-upstream overseer { server 127.0.0.1:8080; }
-
-server {
-    listen 80;
-    server_name review.example.com;
-    location ~ ^/hooks/[A-Za-z0-9_-]+$ {
-        limit_except POST { deny all; }
-        proxy_pass http://overseer;
-        proxy_set_header Host $host;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-    location / { return 404; }
-}
-```
+For public webhook exposure, use the restricted nginx example: [`deploy/nginx/overseer.conf.example`](deploy/nginx/overseer.conf.example)
 
 ### License
 
@@ -135,8 +107,8 @@ Overseer 是自托管的代码审查服务：对接 GitLab（更多 VCS 规划�
 ### 重要说明
 
 - 在 `.env` 中设置**固定**的 **`MASTER_KEY`** 后再启动。用于加密 VCS Token 与 LLM Key；变更后已存凭证失效，需在管理台重新填写。
-- 在管理台配置 **回调 Base URL** 为 GitLab 实际访问的公网地址（源站 nginx 为 **80** 时可填 `http://…`；若 LB 对外提供 **HTTPS**，填 `https://…`）。钩子路径为 `{base}/hooks/{instance_id}`。
-- 若镜像仓库为私有，请先 `docker login` 对应 registry，再执行 `docker compose pull`。
+- Overseer 是内部平台，**不可直接暴露到公网**。特殊情况下必须将 Webhook 回调接口暴露到公网时，请在回调入口配置 IP 白名单，仅允许 Git 平台的出口 IP 访问。
+- 审查过程会将仓库代码及相关上下文发送给配置的 LLM 服务。私有或敏感仓库必须使用经过授权的企业模型、本地模型或符合数据合规要求的模型服务。
 
 ### 功能概览
 
@@ -164,7 +136,7 @@ cp .env.example .env
 3. （可选）在 `.env` 中覆盖镜像：
 
 ```bash
-# OVERSEER_IMAGE=ccr.ccs.tencentyun.com/audi-dask/overseer:20260730-fix1
+OVERSEER_IMAGE=ccr.ccs.tencentyun.com/audi-dask/overseer:latest
 ```
 
 4. 启动：
@@ -175,7 +147,7 @@ docker compose up -d
 docker compose logs -f overseer
 ```
 
-5. 在内网/VPN 打开 **`http://<服务器IP>:8080/`** 完成首次设置（见[公网暴露](#public-exposure-zh)）。
+5. 在内网/VPN 打开 **`http://<服务器IP>:8080/`** 完成首次设置。公网 Webhook 暴露请查看 [`deploy/nginx/overseer.conf.example`](deploy/nginx/overseer.conf.example)。
 
 数据保存在 **`overseer-data`** 卷（数据库、工作区、审查日志）。
 
@@ -197,38 +169,11 @@ docker compose up -d
 | 回调 Base URL | 管理台 → 服务设置；须对 GitLab 可达 |
 | 钩子 Secret | 校验入站 Webhook（非管理台登录密码） |
 
-容器内路径：`DB_PATH=/data/overseer.db`，`WORKSPACE_DIR=/data/workspaces`，`REVIEW_LOG_DIR=/data/reviewlogs`。
+
 
 ### 公网暴露 {#public-exposure-zh}
 
-公网**只暴露 GitLab 回调** `/hooks/{instance_id}`，不要把 `/api/auth/login`、管理台 UI 或其它 `/api/*` 放到公网域名上。
-
-| 访问面 | 地址 | 用途 |
-| --- | --- | --- |
-| 公网 | `http://review.example.com/hooks/{instance_id}` | 仅 GitLab Webhook（源站 nginx **:80**；**443** 一般在 LB） |
-| 内网 | `http://10.x.x.x:8080/`（VPN / 办公网） | 登录、配置、审查记录 |
-
-**回调 Base URL** 填 GitLab 能访问到的对外 URL（LB 终结 TLS 时通常为 `https://review.example.com`）。管理台仅在 **内网/VPN** 通过 **`http://<服务器IP>:8080/`** 访问。
-
-源站 nginx 监听 **80**，反代到 `http://127.0.0.1:8080`。仅当宿主机 **8080** 已被占用时，再在 `.env` 里改 `PORT`。
-
-完整示例：[`deploy/nginx/overseer.conf.example`](deploy/nginx/overseer.conf.example)
-
-```nginx
-upstream overseer { server 127.0.0.1:8080; }
-
-server {
-    listen 80;
-    server_name review.example.com;
-    location ~ ^/hooks/[A-Za-z0-9_-]+$ {
-        limit_except POST { deny all; }
-        proxy_pass http://overseer;
-        proxy_set_header Host $host;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-    location / { return 404; }
-}
-```
+公网 Webhook 暴露请直接使用受限的 nginx 示例：[`deploy/nginx/overseer.conf.example`](deploy/nginx/overseer.conf.example)
 
 ### 许可
 

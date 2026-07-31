@@ -1,6 +1,6 @@
 services:
   overseer:
-    image: ${OVERSEER_IMAGE:-ccr.ccs.tencentyun.com/audi-dask/overseer:20260731-review-retention}
+    image: ${OVERSEER_IMAGE:-ccr.ccs.tencentyun.com/audi-dask/overseer:latest}
     container_name: overseer
     ports:
       - "${PORT:-8080}:8080"

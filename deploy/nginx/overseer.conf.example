@@ -25,6 +25,12 @@ server {
             deny all;
         }
 
+        # Replace these examples with the outbound IPs/CIDRs of your Git platform.
+        # Keep "deny all" so the webhook endpoint fails closed.
+        allow 198.51.100.50;
+        allow 203.0.113.0/24;
+        deny all;
+
         proxy_pass http://overseer;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
