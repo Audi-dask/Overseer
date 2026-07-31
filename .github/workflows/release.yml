@@ -1,0 +1,83 @@
+name: Release binaries
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Test
+        run: go test ./...
+
+      - name: Build release archives
+        env:
+          CGO_ENABLED: "0"
+        run: |
+          set -euo pipefail
+
+          version="${GITHUB_REF_NAME#v}"
+          mkdir -p dist
+
+          build() {
+            os="$1"
+            arch="$2"
+            binary="overseer"
+            archive="overseer_${version}_${os}_${arch}"
+
+            if [ "$os" = "windows" ]; then
+              binary="overseer.exe"
+            fi
+
+            GOOS="$os" GOARCH="$arch" go build \
+              -trimpath \
+              -ldflags="-s -w" \
+              -o "dist/${binary}" \
+              ./cmd/server
+
+            if [ "$os" = "windows" ]; then
+              (cd dist && zip "${archive}.zip" "$binary")
+            else
+              tar -C dist -czf "dist/${archive}.tar.gz" "$binary"
+            fi
+
+            rm "dist/${binary}"
+          }
+
+          build linux amd64
+          build linux arm64
+          build darwin amd64
+          build darwin arm64
+          build windows amd64
+
+          (cd dist && sha256sum * > SHA256SUMS)
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          prerelease=""
+          if [[ "${GITHUB_REF_NAME}" == *-* ]]; then
+            prerelease="--prerelease"
+          fi
+
+          gh release create "${GITHUB_REF_NAME}" \
+            dist/* \
+            --title "Overseer ${GITHUB_REF_NAME}" \
+            --generate-notes \
+            $prerelease
