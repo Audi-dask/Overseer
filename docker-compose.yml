@@ -5,6 +5,7 @@ services:
     ports:
       - "${PORT:-8080}:8080"
     environment:
+      TZ: ${TZ:-Asia/Shanghai}
       MASTER_KEY: ${MASTER_KEY:?set MASTER_KEY in .env}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
       PORT: "8080"
