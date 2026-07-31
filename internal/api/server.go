@@ -724,6 +724,7 @@ func (s *Server) getSettings(w http.ResponseWriter, r *http.Request) {
 		"master_key_configured": true,
 		"max_concurrency":       st.MaxConcurrency,
 		"debounce_sec":          st.DebounceSec,
+		"review_retention_days": st.ReviewRetentionDays,
 		"admin_username":        username,
 		"admin_auth_enabled":    true,
 		"runtime": map[string]any{
@@ -737,6 +738,10 @@ func (s *Server) saveSettings(w http.ResponseWriter, r *http.Request) {
 	var st model.Settings
 	if err := json.NewDecoder(r.Body).Decode(&st); err != nil {
 		writeErr(w, 400, "invalid json")
+		return
+	}
+	if st.ReviewRetentionDays < 0 {
+		writeErr(w, 400, "审查日志保留天数不能小于 0")
 		return
 	}
 	if err := s.Store.SaveSettings(r.Context(), st); err != nil {

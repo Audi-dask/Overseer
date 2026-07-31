@@ -6,7 +6,9 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"syscall"
 	"time"
 
 	"github.com/Audi-dask/Overseer/internal/api"
@@ -59,6 +61,10 @@ func main() {
 		log.Printf("startup: 管理员未初始化，请打开管理台完成首次设置（或设置环境变量 ADMIN_PASSWORD）")
 	}
 
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	go runReviewCleanup(ctx, st)
+
 	settings, _ := st.GetSettings(context.Background())
 	debounce := 30 * time.Second
 	concurrency := 8
@@ -96,7 +102,14 @@ func main() {
 	log.Printf("overseer listening on http://localhost%s (db=%s, debounce=%s, concurrency=%d)",
 		addr, dbPath, debounce, concurrency)
 	handler := api.Logging(srv.AuthMiddleware(mux))
-	if err := http.ListenAndServe(addr, handler); err != nil {
+	httpServer := &http.Server{Addr: addr, Handler: handler}
+	go func() {
+		<-ctx.Done()
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		_ = httpServer.Shutdown(shutdownCtx)
+	}()
+	if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatal(err)
 	}
 }

@@ -136,8 +136,10 @@ func (r *Runner) Handle(ctx context.Context, job queue.Job) {
 	} else {
 		runlog.Printf(ctx, "pipeline: 无 MR / Commit，跳过 GitLab 评论回填")
 	}
-	_ = r.Store.FinishReview(ctx, rec.ID, model.ReviewSuccess,
-		int(time.Since(start).Seconds()), commentCount, "")
+	if err := r.finishReview(ctx, rec.ID, model.ReviewSuccess,
+		int(time.Since(start).Seconds()), commentCount, ""); err != nil {
+		runlog.Printf(ctx, "pipeline: finish success state: %v", err)
+	}
 	runlog.Printf(ctx, "pipeline: ok %s !%s %s mode=agent comments=%d",
 		repo.FullName, tr.MRID, shortSHA(tr.CommitSHA), commentCount)
 	summary := fmt.Sprintf("共 %d 条意见，详见 MR", commentCount)
@@ -232,9 +234,17 @@ func (r *Runner) reviewGuidance(ctx context.Context, repo *model.Repo, tr model.
 
 func (r *Runner) fail(ctx context.Context, reviewID string, repo *model.Repo, tr model.ReviewTrigger, start time.Time, msg string) {
 	runlog.Printf(ctx, "pipeline: fail %s !%s: %s", repo.FullName, tr.MRID, msg)
-	_ = r.Store.FinishReview(ctx, reviewID, model.ReviewFailed,
-		int(time.Since(start).Seconds()), 0, msg)
+	if err := r.finishReview(ctx, reviewID, model.ReviewFailed,
+		int(time.Since(start).Seconds()), 0, msg); err != nil {
+		runlog.Printf(ctx, "pipeline: finish failed state: %v", err)
+	}
 	r.sendNotify(ctx, repo, tr, "failed", msg)
+}
+
+func (r *Runner) finishReview(ctx context.Context, reviewID string, status model.ReviewStatus, durationSec, commentCount int, errMsg string) error {
+	finishCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
+	return r.Store.FinishReview(finishCtx, reviewID, status, durationSec, commentCount, errMsg)
 }
 
 func (r *Runner) sendNotify(ctx context.Context, repo *model.Repo, tr model.ReviewTrigger, status, summary string) {

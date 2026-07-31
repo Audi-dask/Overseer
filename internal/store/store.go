@@ -107,6 +107,7 @@ CREATE TABLE IF NOT EXISTS reviews (
 );
 
 CREATE INDEX IF NOT EXISTS idx_reviews_lookup ON reviews(repo, mr_id, commit_sha);
+CREATE INDEX IF NOT EXISTS idx_reviews_created_at ON reviews(created_at);
 
 CREATE TABLE IF NOT EXISTS settings (
   key TEXT PRIMARY KEY,
@@ -193,12 +194,13 @@ func (s *Store) ensureDefaults() error {
 		}
 	}
 	defaults := map[string]string{
-		"callback_base_url":   "",
-		"webhook_secret":      "",
-		"max_concurrency":     "8",
-		"debounce_sec":        "30",
-		"admin_username":      "admin",
-		"admin_password_hash": "",
+		"callback_base_url":     "",
+		"webhook_secret":        "",
+		"max_concurrency":       "8",
+		"debounce_sec":          "30",
+		"review_retention_days": "30",
+		"admin_username":        "admin",
+		"admin_password_hash":   "",
 	}
 	for k, v := range defaults {
 		if _, err := s.db.Exec(`INSERT OR IGNORE INTO settings(key, value) VALUES(?, ?)`, k, v); err != nil {
@@ -517,10 +519,11 @@ func (s *Store) GetSettings(ctx context.Context) (*model.Settings, error) {
 		}
 	}
 	st := &model.Settings{
-		CallbackBaseURL: m["callback_base_url"],
-		WebhookSecret:   sec,
-		MaxConcurrency:  atoiDefault(m["max_concurrency"], 8),
-		DebounceSec:     atoiDefault(m["debounce_sec"], 30),
+		CallbackBaseURL:     m["callback_base_url"],
+		WebhookSecret:       sec,
+		MaxConcurrency:      atoiDefault(m["max_concurrency"], 8),
+		DebounceSec:         atoiDefault(m["debounce_sec"], 30),
+		ReviewRetentionDays: atoiDefault(m["review_retention_days"], 30),
 	}
 	return st, nil
 }
@@ -542,9 +545,10 @@ func (s *Store) SaveSettings(ctx context.Context, st model.Settings) error {
 		_ = s.db.QueryRowContext(ctx, `SELECT value FROM settings WHERE key='webhook_secret'`).Scan(&enc)
 		if enc != "" {
 			pairs := map[string]string{
-				"callback_base_url": st.CallbackBaseURL,
-				"max_concurrency":   fmt.Sprintf("%d", st.MaxConcurrency),
-				"debounce_sec":      fmt.Sprintf("%d", st.DebounceSec),
+				"callback_base_url":     st.CallbackBaseURL,
+				"max_concurrency":       fmt.Sprintf("%d", st.MaxConcurrency),
+				"debounce_sec":          fmt.Sprintf("%d", st.DebounceSec),
+				"review_retention_days": fmt.Sprintf("%d", st.ReviewRetentionDays),
 			}
 			for k, v := range pairs {
 				if _, err := s.db.ExecContext(ctx, `
@@ -561,10 +565,11 @@ ON CONFLICT(key) DO UPDATE SET value=excluded.value`, k, v); err != nil {
 		return err
 	}
 	pairs := map[string]string{
-		"callback_base_url": st.CallbackBaseURL,
-		"webhook_secret":    encSecret,
-		"max_concurrency":   fmt.Sprintf("%d", st.MaxConcurrency),
-		"debounce_sec":      fmt.Sprintf("%d", st.DebounceSec),
+		"callback_base_url":     st.CallbackBaseURL,
+		"webhook_secret":        encSecret,
+		"max_concurrency":       fmt.Sprintf("%d", st.MaxConcurrency),
+		"debounce_sec":          fmt.Sprintf("%d", st.DebounceSec),
+		"review_retention_days": fmt.Sprintf("%d", st.ReviewRetentionDays),
 	}
 	for k, v := range pairs {
 		if _, err := s.db.ExecContext(ctx, `
@@ -666,6 +671,30 @@ func (s *Store) FinishReview(ctx context.Context, id string, status model.Review
 	_, err := s.db.ExecContext(ctx, `
 UPDATE reviews SET status=?, duration_sec=?, comments=?, error=? WHERE id=?`,
 		status, durationSec, comments, errMsg, id)
+	return err
+}
+
+func (s *Store) ListExpiredReviewIDs(ctx context.Context, before time.Time) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx, `
+SELECT id FROM reviews WHERE created_at < ? AND status <> ? ORDER BY created_at`,
+		before.UTC().Format(time.RFC3339), model.ReviewRunning)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
+func (s *Store) DeleteReview(ctx context.Context, id string) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM reviews WHERE id=?`, id)
 	return err
 }
 
