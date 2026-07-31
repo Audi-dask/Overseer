@@ -8,16 +8,6 @@ Self-hosted code review for merge requests and push events — webhook-driven, p
 
 **Web** · [GitHub](https://github.com/Audi-dask/Overseer) · [License (AGPL-3.0)](LICENSE)
 
-## Screenshots / 界面预览
-
-### Dashboard / 总览
-
-![Overseer dashboard](img/dashboard.png)
-
-### Review Prompt / 审查提示词
-
-![Overseer review prompt settings](img/prompt.png)
-
 ---
 
 <a id="english"></a>
