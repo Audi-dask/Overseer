@@ -98,6 +98,16 @@ body {
   color: #64748b;
 }
 
+.sidebar-footer a {
+  color: #94a3b8;
+  text-decoration: none;
+}
+
+.sidebar-footer a:hover {
+  color: #e2e8f0;
+  text-decoration: underline;
+}
+
 .main {
   flex: 1;
   min-width: 0;

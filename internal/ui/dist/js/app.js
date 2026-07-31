@@ -82,7 +82,11 @@ CR.mountShell = function (activeId, title) {
         <div class="brand-sub">代码审查控制台</div>
       </div>
       <nav class="sidebar-nav">${links}</nav>
-      <div class="sidebar-footer" id="sidebar-mode">Agent 审查</div>
+      <div class="sidebar-footer">
+        <span>© 2026 Overseer</span>
+        <span> · </span>
+        <a href="https://github.com/Audi-dask/Overseer.git" target="_blank" rel="noopener noreferrer">GitHub</a>
+      </div>
     </aside>
     <div class="main">
       <header class="topbar">
@@ -107,15 +111,6 @@ CR.mountShell = function (activeId, title) {
       if (badge && me.username) badge.textContent = me.username;
     })
     .catch(() => CR.redirectToLogin());
-
-  CR.apiGet("/api/overview")
-    .then((o) => {
-      const el = document.getElementById("sidebar-mode");
-      if (!el) return;
-      el.textContent = "Agent 审查";
-      el.title = o.mode_note || "";
-    })
-    .catch(() => {});
 };
 
 CR.apiGet = async function (path) {
