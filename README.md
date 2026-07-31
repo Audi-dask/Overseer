@@ -1,5 +1,7 @@
 # Overseer
 
+![Overseer — AI-driven self-hosted code review platform](img/overseer.jpeg)
+
 **[English](#english) | [中文](#中文)**
 
 Self-hosted code review for merge requests and push events — webhook-driven, pluggable LLMs, agent-based review, GitLab feedback, and notifications.
@@ -10,11 +12,11 @@ Self-hosted code review for merge requests and push events — webhook-driven, p
 
 ### Dashboard / 总览
 
-![Overseer dashboard](dashboard.png)
+![Overseer dashboard](img/dashboard.png)
 
 ### Review Prompt / 审查提示词
 
-![Overseer review prompt settings](prompt.png)
+![Overseer review prompt settings](img/prompt.png)
 
 ---
 
