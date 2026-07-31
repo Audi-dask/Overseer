@@ -595,20 +595,22 @@ func (c *Client) getMRDiffRefs(ctx context.Context, instance *model.Instance, to
 // PostInlineComments creates diff discussions for line-anchored review findings.
 // Comments without StartLine are skipped. Failures are returned as a joined error
 // after attempting all comments (summary note should already be posted).
-func (c *Client) PostInlineComments(ctx context.Context, instance *model.Instance, token string, repo *model.Repo, mrID string, comments []vcs.InlineComment) error {
+func (c *Client) PostInlineComments(ctx context.Context, instance *model.Instance, token string, repo *model.Repo, mrID string, comments []vcs.InlineComment) ([]vcs.InlineComment, error) {
 	if len(comments) == 0 {
-		return nil
+		return nil, nil
 	}
 	refs, err := c.getMRDiffRefs(ctx, instance, token, repo, mrID)
 	if err != nil {
-		return err
+		return comments, err
 	}
 	base := c.apiBase(instance.BaseURL)
 	u := fmt.Sprintf("%s/projects/%s/merge_requests/%s/discussions", base, url.PathEscape(repo.ExternalID), mrID)
 	var errs []string
+	var failed []vcs.InlineComment
 	posted := 0
 	for _, cm := range comments {
 		if cm.StartLine <= 0 || strings.TrimSpace(cm.Path) == "" {
+			failed = append(failed, cm)
 			continue
 		}
 		body := formatInlineBody(cm)
@@ -626,24 +628,23 @@ func (c *Client) PostInlineComments(ctx context.Context, instance *model.Instanc
 			"position": pos,
 		})
 		if err != nil {
+			failed = append(failed, cm)
 			errs = append(errs, err.Error())
 			continue
 		}
 		b, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
 		if resp.StatusCode >= 300 {
+			failed = append(failed, cm)
 			errs = append(errs, fmt.Sprintf("%s:%d %s", cm.Path, cm.StartLine, string(b)))
 			continue
 		}
 		posted++
 	}
-	if posted == 0 && len(errs) > 0 {
-		return fmt.Errorf("gitlab inline discussions failed: %s", strings.Join(errs, "; "))
-	}
 	if len(errs) > 0 {
-		return fmt.Errorf("gitlab inline partial (%d ok): %s", posted, strings.Join(errs, "; "))
+		return failed, fmt.Errorf("gitlab inline partial (%d ok): %s", posted, strings.Join(errs, "; "))
 	}
-	return nil
+	return failed, nil
 }
 
 func formatInlineBody(cm vcs.InlineComment) string {

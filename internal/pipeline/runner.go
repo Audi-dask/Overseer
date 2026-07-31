@@ -109,16 +109,28 @@ func (r *Runner) Handle(ctx context.Context, job queue.Job) {
 	}
 	postMR := shouldPostMRComment(repo, tr)
 	if postMR {
+		anchored := make([]vcs.InlineComment, 0, len(inline))
+		failedInline := make([]vcs.InlineComment, 0, len(inline))
+		for _, cm := range inline {
+			if cm.StartLine <= 0 || strings.TrimSpace(cm.Path) == "" {
+				failedInline = append(failedInline, cm)
+				continue
+			}
+			anchored = append(anchored, cm)
+		}
+		if len(anchored) > 0 {
+			failed, inlineErr := prov.PostInlineComments(ctx, inst, token, repo, tr.MRID, anchored)
+			failedInline = append(failedInline, failed...)
+			if inlineErr != nil {
+				runlog.Printf(ctx, "pipeline: inline discussions: %v", inlineErr)
+			} else {
+				runlog.Printf(ctx, "pipeline: inline discussions ok count=%d", len(anchored)-len(failed))
+			}
+		}
+		content = formatMRSummary(inline, failedInline)
 		if err := prov.PostComment(ctx, inst, token, repo, tr.MRID, content); err != nil {
 			r.fail(ctx, rec.ID, repo, tr, start, "post comment: "+err.Error())
 			return
-		}
-		if len(inline) > 0 {
-			if err := prov.PostInlineComments(ctx, inst, token, repo, tr.MRID, inline); err != nil {
-				runlog.Printf(ctx, "pipeline: inline discussions: %v", err)
-			} else {
-				runlog.Printf(ctx, "pipeline: inline discussions ok count=%d", len(inline))
-			}
 		}
 	} else if tr.CommitSHA != "" {
 		if err := prov.PostCommitComment(ctx, inst, token, repo, tr.CommitSHA, content); err != nil {
@@ -186,9 +198,6 @@ func (r *Runner) runAgent(ctx context.Context, inst *model.Instance, token strin
 	}
 	inline := make([]vcs.InlineComment, 0, len(res.Comments))
 	for _, c := range res.Comments {
-		if c.StartLine <= 0 || strings.TrimSpace(c.Path) == "" {
-			continue
-		}
 		inline = append(inline, vcs.InlineComment{
 			Path:           c.Path,
 			Content:        c.Content,
@@ -276,6 +285,62 @@ func (r *Runner) sendNotify(ctx context.Context, repo *model.Repo, tr model.Revi
 		}
 		runlog.Printf(ctx, "notify ok: repo=%s channel=%s status=%s", repo.FullName, ch.Name, status)
 	}
+}
+
+func formatMRSummary(all, fallback []vcs.InlineComment) string {
+	high, medium, low := 0, 0, 0
+	for _, c := range all {
+		switch strings.ToLower(c.Severity) {
+		case "high", "critical", "error":
+			high++
+		case "medium", "warning":
+			medium++
+		default:
+			low++
+		}
+	}
+	var b strings.Builder
+	b.WriteString("## Overseer Review\n\n")
+	if len(all) == 0 {
+		b.WriteString("未发现需要评论的问题。")
+		return b.String()
+	}
+	posted := len(all) - len(fallback)
+	b.WriteString(fmt.Sprintf("共 **%d** 条意见（high %d / medium %d / low %d）。\n\n", len(all), high, medium, low))
+	b.WriteString(fmt.Sprintf("已在 MR Diff 对应代码行发布 **%d** 条 Discussion。", posted))
+	if len(fallback) == 0 {
+		return b.String()
+	}
+	b.WriteString(fmt.Sprintf("以下 **%d** 条无法发布为行内 Discussion，详情如下：\n\n---\n\n", len(fallback)))
+	for i, c := range fallback {
+		loc := c.Path
+		if c.StartLine > 0 {
+			if c.EndLine > c.StartLine {
+				loc = fmt.Sprintf("%s:%d-%d", c.Path, c.StartLine, c.EndLine)
+			} else {
+				loc = fmt.Sprintf("%s:%d", c.Path, c.StartLine)
+			}
+		}
+		sev := c.Severity
+		if sev == "" {
+			sev = "info"
+		}
+		cat := c.Category
+		if cat == "" {
+			cat = "review"
+		}
+		b.WriteString(fmt.Sprintf("### %d. `%s`\n\n", i+1, loc))
+		b.WriteString(fmt.Sprintf("- **严重程度**: %s\n- **类别**: %s\n\n%s\n\n", sev, cat, strings.TrimSpace(c.Content)))
+		if code := strings.TrimSpace(c.SuggestionCode); code != "" {
+			b.WriteString("**建议修改：**\n\n```\n")
+			b.WriteString(code)
+			if !strings.HasSuffix(code, "\n") {
+				b.WriteByte('\n')
+			}
+			b.WriteString("```\n\n")
+		}
+	}
+	return b.String()
 }
 
 func renderPrompt(tmpl string, vars map[string]string) string {

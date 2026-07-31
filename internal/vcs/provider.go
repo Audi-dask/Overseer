@@ -30,8 +30,8 @@ type Provider interface {
 	DeleteWebhook(ctx context.Context, instance *model.Instance, token string, repo *model.Repo) error
 	ParseEvent(payload []byte, headers map[string]string, secret string) (*model.ReviewTrigger, error)
 	PostComment(ctx context.Context, instance *model.Instance, token string, repo *model.Repo, mrID, content string) error
-	// PostInlineComments posts diff discussions for line-anchored findings (best-effort).
-	PostInlineComments(ctx context.Context, instance *model.Instance, token string, repo *model.Repo, mrID string, comments []InlineComment) error
+	// PostInlineComments posts diff discussions and returns findings that could not be posted.
+	PostInlineComments(ctx context.Context, instance *model.Instance, token string, repo *model.Repo, mrID string, comments []InlineComment) ([]InlineComment, error)
 	// PostCommitComment posts a summary note on a commit (Push 触发等无 MR 场景).
 	PostCommitComment(ctx context.Context, instance *model.Instance, token string, repo *model.Repo, commitSHA, content string) error
 	// PostCommitInlineComments posts line-anchored notes on a commit diff (best-effort).
