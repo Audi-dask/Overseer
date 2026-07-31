@@ -735,10 +735,32 @@ func (s *Server) getSettings(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) saveSettings(w http.ResponseWriter, r *http.Request) {
-	var st model.Settings
-	if err := json.NewDecoder(r.Body).Decode(&st); err != nil {
+	var in struct {
+		CallbackBaseURL     string `json:"callback_base_url"`
+		WebhookSecret       string `json:"webhook_secret"`
+		MaxConcurrency      int    `json:"max_concurrency"`
+		DebounceSec         int    `json:"debounce_sec"`
+		ReviewRetentionDays *int   `json:"review_retention_days"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
 		writeErr(w, 400, "invalid json")
 		return
+	}
+	st := model.Settings{
+		CallbackBaseURL: in.CallbackBaseURL,
+		WebhookSecret:   in.WebhookSecret,
+		MaxConcurrency:  in.MaxConcurrency,
+		DebounceSec:     in.DebounceSec,
+	}
+	if in.ReviewRetentionDays == nil {
+		current, err := s.Store.GetSettings(r.Context())
+		if err != nil {
+			writeErr(w, 500, err.Error())
+			return
+		}
+		st.ReviewRetentionDays = current.ReviewRetentionDays
+	} else {
+		st.ReviewRetentionDays = *in.ReviewRetentionDays
 	}
 	if st.ReviewRetentionDays < 0 {
 		writeErr(w, 400, "审查日志保留天数不能小于 0")

@@ -73,7 +73,7 @@
               </div>
               <div class="col-md-4">
                 <label class="form-label" for="review-retention-days">审查日志保留天数</label>
-                <input class="form-control" id="review-retention-days" type="number" min="0" />
+                <input class="form-control" id="review-retention-days" type="number" min="0" required />
                 <div class="form-text">默认 30 天；填 0 表示永久保留。过期记录与对应日志同步删除。</div>
               </div>
             </div>
@@ -173,7 +173,12 @@
 
       document.getElementById("btn-save").addEventListener("click", async () => {
         try {
-          const retentionDays = Number(document.getElementById("review-retention-days").value);
+          const retentionRaw = document.getElementById("review-retention-days").value.trim();
+          if (retentionRaw === "") {
+            CR.showToast("请填写审查日志保留天数；填 0 表示永久保留", "danger");
+            return;
+          }
+          const retentionDays = Number(retentionRaw);
           if (!Number.isInteger(retentionDays) || retentionDays < 0) {
             CR.showToast("审查日志保留天数必须是大于等于 0 的整数", "danger");
             return;
