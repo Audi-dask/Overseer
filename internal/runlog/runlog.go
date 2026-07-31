@@ -150,9 +150,13 @@ func Read(reviewID string) (string, error) {
 	return string(b), nil
 }
 
-// Remove deletes a review log (best effort).
-func Remove(reviewID string) {
-	_ = os.Remove(pathFor(reviewID))
+// Remove deletes a review log. Missing logs are already clean.
+func Remove(reviewID string) error {
+	err := os.Remove(pathFor(reviewID))
+	if os.IsNotExist(err) {
+		return nil
+	}
+	return err
 }
 
 // With binds a sink to ctx so agent and pipeline code can find it.

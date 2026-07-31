@@ -153,10 +153,11 @@ type ReviewTrigger struct {
 }
 
 type Settings struct {
-	CallbackBaseURL string `json:"callback_base_url"`
-	WebhookSecret   string `json:"webhook_secret"`
-	MaxConcurrency  int    `json:"max_concurrency"`
-	DebounceSec     int    `json:"debounce_sec"`
+	CallbackBaseURL     string `json:"callback_base_url"`
+	WebhookSecret       string `json:"webhook_secret"`
+	MaxConcurrency      int    `json:"max_concurrency"`
+	DebounceSec         int    `json:"debounce_sec"`
+	ReviewRetentionDays int    `json:"review_retention_days"`
 }
 
 type PromptConfig struct {

@@ -8,7 +8,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"time"
 )
 
 // Prepare materializes a shallow checkout of commitSHA so OCR agent tools
@@ -32,55 +31,46 @@ func Prepare(ctx context.Context, baseURL, fullName, token, commitSHA, cacheRoot
 	}
 
 	safe := strings.ReplaceAll(strings.Trim(fullName, "/"), "/", "__")
-	dir = filepath.Join(cacheRoot, fmt.Sprintf("%s-%s", safe, short(commitSHA)))
-	cleanup = func() { _ = os.RemoveAll(dir) }
-
-	// Reuse an existing checkout when it already holds the commit.
-	if fi, statErr := os.Stat(filepath.Join(dir, ".git")); statErr == nil && fi.IsDir() {
-		if git(ctx, dir, "cat-file", "-e", commitSHA+"^{commit}") == nil {
-			if git(ctx, dir, "checkout", "--force", commitSHA) == nil {
-				return dir, cleanup, nil
-			}
-		}
-		_ = os.RemoveAll(dir)
+	dir, err = os.MkdirTemp(cacheRoot, safe+"-"+short(commitSHA)+"-")
+	if err != nil {
+		return "", nil, err
 	}
+	cleanup = func() { _ = os.RemoveAll(dir) }
+	ok := false
+	defer func() {
+		if !ok {
+			cleanup()
+		}
+	}()
 
 	cloneURL, err := httpsCloneURL(baseURL, fullName, token)
 	if err != nil {
 		return "", nil, err
 	}
 
-	tmp := filepath.Join(cacheRoot, fmt.Sprintf(".%s-%d.tmp", safe, time.Now().UnixNano()))
-	defer func() { _ = os.RemoveAll(tmp) }()
-	if err := os.MkdirAll(tmp, 0o755); err != nil {
-		return "", nil, err
-	}
-	if err := git(ctx, tmp, "init", "--quiet"); err != nil {
+	if err := git(ctx, dir, "init", "--quiet"); err != nil {
 		return "", nil, fmt.Errorf("git init: %w", err)
 	}
-	if err := git(ctx, tmp, "remote", "add", "origin", cloneURL); err != nil {
+	if err := git(ctx, dir, "remote", "add", "origin", cloneURL); err != nil {
 		return "", nil, fmt.Errorf("git remote add: %w", err)
 	}
 
 	// Fetching the SHA directly needs uploadpack.allowReachableSHA1InWant on the
 	// server; fall back to branch + merge-request refs when it is disabled.
-	fetchErr := git(ctx, tmp, "fetch", "--depth", "50", "origin", commitSHA)
+	fetchErr := git(ctx, dir, "fetch", "--depth", "50", "origin", commitSHA)
 	if fetchErr != nil {
-		alt := git(ctx, tmp, "fetch", "--depth", "50", "origin",
+		alt := git(ctx, dir, "fetch", "--depth", "50", "origin",
 			"+refs/heads/*:refs/remotes/origin/*",
 			"+refs/merge-requests/*/head:refs/remotes/origin/mr/*")
 		if alt != nil {
 			return "", nil, fmt.Errorf("git fetch %s: %v (refs fallback: %v)", short(commitSHA), fetchErr, alt)
 		}
 	}
-	if err := git(ctx, tmp, "-c", "advice.detachedHead=false", "checkout", "--force", commitSHA); err != nil {
+	if err := git(ctx, dir, "-c", "advice.detachedHead=false", "checkout", "--force", commitSHA); err != nil {
 		return "", nil, fmt.Errorf("git checkout %s: %w", short(commitSHA), err)
 	}
 
-	_ = os.RemoveAll(dir)
-	if err := os.Rename(tmp, dir); err != nil {
-		return "", nil, err
-	}
+	ok = true
 	return dir, cleanup, nil
 }
 

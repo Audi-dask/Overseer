@@ -63,13 +63,18 @@
               <div class="form-text">落库加密存储。建议设一串随机字符串；留空则不做钩子 Token 校验（仅适合内网调试）。</div>
             </div>
             <div class="row g-3">
-              <div class="col-md-6">
+              <div class="col-md-4">
                 <label class="form-label" for="max-concurrency">Agent 审查并发上限</label>
                 <input class="form-control" id="max-concurrency" type="number" min="1" max="64" />
               </div>
-              <div class="col-md-6">
+              <div class="col-md-4">
                 <label class="form-label" for="debounce-sec">同 MR 防抖窗口（秒）</label>
                 <input class="form-control" id="debounce-sec" type="number" min="0" max="600" />
+              </div>
+              <div class="col-md-4">
+                <label class="form-label" for="review-retention-days">审查日志保留天数</label>
+                <input class="form-control" id="review-retention-days" type="number" min="0" required />
+                <div class="form-text">默认 30 天；填 0 表示永久保留。过期记录与对应日志同步删除。</div>
               </div>
             </div>
             <div class="form-text mt-2">服务仅提供 Agent 审查：会 shallow clone MR 提交到本地，通过工具读取代码并回填评论。</div>
@@ -141,6 +146,7 @@
         document.getElementById("webhook-secret").value = s.webhook_secret || "";
         document.getElementById("max-concurrency").value = s.max_concurrency ?? 8;
         document.getElementById("debounce-sec").value = s.debounce_sec ?? 30;
+        document.getElementById("review-retention-days").value = s.review_retention_days ?? 30;
         document.getElementById("admin-username").value = s.admin_username || "admin";
         const base = (s.callback_base_url || "https://review.example.com").replace(/\/$/, "");
         document.getElementById("hook-example").textContent = base + "/hooks/{instance_id}";
@@ -167,13 +173,24 @@
 
       document.getElementById("btn-save").addEventListener("click", async () => {
         try {
+          const retentionRaw = document.getElementById("review-retention-days").value.trim();
+          if (retentionRaw === "") {
+            CR.showToast("请填写审查日志保留天数；填 0 表示永久保留", "danger");
+            return;
+          }
+          const retentionDays = Number(retentionRaw);
+          if (!Number.isInteger(retentionDays) || retentionDays < 0) {
+            CR.showToast("审查日志保留天数必须是大于等于 0 的整数", "danger");
+            return;
+          }
           await CR.apiSend("PUT", "/api/settings", {
             callback_base_url: document.getElementById("callback-base").value.replace(/\/$/, ""),
             webhook_secret: document.getElementById("webhook-secret").value,
             max_concurrency: Number(document.getElementById("max-concurrency").value) || 8,
             debounce_sec: Number(document.getElementById("debounce-sec").value) || 30,
+            review_retention_days: retentionDays,
           });
-          CR.showToast("服务设置已保存（并发/防抖需重启生效）", "success");
+          CR.showToast("服务设置已保存（并发/防抖需重启生效，保留策略定期自动执行）", "success");
         } catch (err) {
           CR.showToast(String(err.message || err), "danger");
         }
