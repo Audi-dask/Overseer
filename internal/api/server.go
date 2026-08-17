@@ -52,6 +52,7 @@ func (s *Server) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/repos", s.listRepos)
 	mux.HandleFunc("DELETE /api/repos/{id}", s.deleteRepo)
 	mux.HandleFunc("POST /api/repos/{id}/review", s.setReview)
+	mux.HandleFunc("POST /api/repos/{id}/review-latest", s.reviewLatest)
 	mux.HandleFunc("PUT /api/repos/{id}/trigger-mode", s.setTriggerMode)
 	mux.HandleFunc("POST /api/repos/{id}/notify", s.setNotify)
 	mux.HandleFunc("GET /api/llm-providers", s.listLLM)
@@ -62,6 +63,7 @@ func (s *Server) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/firewall", s.getFirewall)
 	mux.HandleFunc("PUT /api/firewall", s.saveFirewall)
 	mux.HandleFunc("GET /api/reviews", s.listReviews)
+	mux.HandleFunc("GET /api/reviews/{id}", s.getReview)
 	mux.HandleFunc("GET /api/reviews/{id}/log", s.getReviewLog)
 	mux.HandleFunc("POST /api/reviews/{id}/rerun", s.rerunReview)
 	mux.HandleFunc("GET /api/settings", s.getSettings)
@@ -695,6 +697,15 @@ func (s *Server) listReviews(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, list)
 }
 
+func (s *Server) getReview(w http.ResponseWriter, r *http.Request) {
+	review, err := s.Store.GetReview(r.Context(), r.PathValue("id"))
+	if err != nil {
+		writeErr(w, http.StatusNotFound, "review not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, review)
+}
+
 func (s *Server) getReviewLog(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if _, err := s.Store.GetReview(r.Context(), id); err != nil {
@@ -929,6 +940,75 @@ func (s *Server) saveNotifyTemplate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, map[string]string{"status": "ok"})
+}
+
+func (s *Server) reviewLatest(w http.ResponseWriter, r *http.Request) {
+	repo, err := s.Store.GetRepo(r.Context(), r.PathValue("id"))
+	if err != nil {
+		writeErr(w, http.StatusNotFound, "repo not found")
+		return
+	}
+	if !repo.ReviewEnabled {
+		writeErr(w, http.StatusConflict, "请先开启 AI 审查")
+		return
+	}
+	branch := strings.TrimSpace(repo.DefaultBranch)
+	if branch == "" {
+		writeErr(w, http.StatusBadRequest, "仓库默认分支为空")
+		return
+	}
+	inst, err := s.Store.GetInstance(r.Context(), repo.InstanceID)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if inst.Type != model.VCSGitLab {
+		writeErr(w, http.StatusBadRequest, "仅支持 GitLab 仓库")
+		return
+	}
+	token, err := s.Store.GetInstanceToken(r.Context(), inst.ID)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	p := s.provider(inst.Type)
+	if p == nil {
+		writeErr(w, http.StatusBadRequest, "仅支持 GitLab 仓库")
+		return
+	}
+	if s.Queue == nil {
+		writeErr(w, http.StatusServiceUnavailable, "review queue unavailable")
+		return
+	}
+	head, err := p.BranchHead(r.Context(), inst, token, repo, branch)
+	if err != nil {
+		writeErr(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	job := queue.Job{
+		InstanceID: repo.InstanceID,
+		Force:      true,
+		Trigger: model.ReviewTrigger{
+			InstanceID: repo.InstanceID,
+			Repo:       repo.FullName,
+			ExternalID: repo.ExternalID,
+			MRID:       branch,
+			CommitSHA:  head.CommitID,
+			EventType:  "push",
+			MRURL:      head.WebURL,
+			Project:    repo.FullName,
+			Branch:     branch,
+			Author:     "Overseer Manual",
+		},
+	}
+	s.Queue.EnqueueNow(job)
+	writeJSON(w, http.StatusAccepted, map[string]string{
+		"status":     "accepted",
+		"repo_id":    repo.ID,
+		"branch":     branch,
+		"commit":     head.CommitID,
+		"commit_url": head.WebURL,
+	})
 }
 
 // rerunReview replays a stored review with Force=true so the same commit can be

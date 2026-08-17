@@ -169,6 +169,40 @@ func (c *Client) ListRepos(ctx context.Context, instance *model.Instance, token 
 	return c.toRepos(items), nil
 }
 
+func (c *Client) BranchHead(ctx context.Context, instance *model.Instance, token string, repo *model.Repo, branch string) (*vcs.BranchHead, error) {
+	branch = strings.TrimSpace(branch)
+	if branch == "" {
+		return nil, fmt.Errorf("default branch required")
+	}
+	base := c.apiBase(instance.BaseURL)
+	u := fmt.Sprintf("%s/projects/%s/repository/branches/%s", base, url.PathEscape(repo.ExternalID), url.PathEscape(branch))
+	resp, err := c.do(ctx, http.MethodGet, u, token, nil)
+	if err != nil {
+		return nil, err
+	}
+	b, readErr := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if readErr != nil {
+		return nil, readErr
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("gitlab get branch head: %s: %s", resp.Status, string(b))
+	}
+	var out struct {
+		Commit struct {
+			ID     string `json:"id"`
+			WebURL string `json:"web_url"`
+		} `json:"commit"`
+	}
+	if err := json.Unmarshal(b, &out); err != nil {
+		return nil, fmt.Errorf("gitlab get branch head: decode json: %w", err)
+	}
+	if strings.TrimSpace(out.Commit.ID) == "" {
+		return nil, fmt.Errorf("gitlab get branch head: commit id missing")
+	}
+	return &vcs.BranchHead{CommitID: out.Commit.ID, WebURL: out.Commit.WebURL}, nil
+}
+
 // SearchRepos matches GitLab groups and projects by keyword.
 // Prefer group hits: if any group matches, expand its (sub)projects; also merge
 // direct project-name matches. Caps at 200 candidates to keep the UI usable.

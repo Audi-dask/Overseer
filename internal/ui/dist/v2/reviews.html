@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>审查记录 · Overseer</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" />
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet" />
+    <link href="css/app-v2.css" rel="stylesheet" />
+    <style>
+      .review-report {
+        min-height: 240px;
+        padding: 1.25rem;
+        border: 1px solid #334155;
+        border-radius: 0.75rem;
+        background: #0f172a;
+        color: #e2e8f0;
+        font-size: 1rem;
+        line-height: 1.65;
+        overflow-wrap: anywhere;
+      }
+      .review-report h1, .review-report h2, .review-report h3,
+      .review-report h4, .review-report h5, .review-report h6 {
+        margin: 1.4em 0 0.65em;
+        color: #f8fafc;
+        line-height: 1.3;
+      }
+      .review-report h1:first-child, .review-report h2:first-child, .review-report h3:first-child { margin-top: 0; }
+      .review-report p { margin: 0 0 1rem; }
+      .review-report ul { margin: 0 0 1rem; padding-left: 1.5rem; }
+      .review-report li + li { margin-top: 0.35rem; }
+      .review-report code { padding: 0.15em 0.35em; border-radius: 0.3rem; background: #1e293b; color: #f8fafc; }
+      .review-report pre { margin: 0 0 1rem; padding: 1rem; border-radius: 0.5rem; background: #020617; overflow-x: auto; }
+      .review-report pre code { padding: 0; background: transparent; white-space: pre; }
+      .review-report hr { border-color: #475569; }
+      .review-report-empty { color: #94a3b8; }
+    </style>
+  </head>
+  <body>
+    <div id="app" class="app-shell">
+      <div id="page-content" hidden>
+        <div class="boundary-banner">
+          审查记录与 Agent 日志；MR 模式回填 MR 评论，Push 模式回填 Commit 评论。
+        </div>
+
+        <div class="panel">
+          <div class="panel-header">
+            <h2>审查历史</h2>
+            <div class="d-flex gap-2 align-items-center">
+              <button class="btn btn-sm btn-outline-secondary" id="refresh-btn">刷新</button>
+              <select class="form-select form-select-sm" id="filter-status" style="width: auto">
+                <option value="">全部状态</option>
+                <option value="success">成功</option>
+                <option value="failed">失败</option>
+                <option value="running">进行中</option>
+                <option value="skipped">跳过</option>
+              </select>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table class="table table-hover mb-0">
+              <thead class="table-light">
+                <tr>
+                  <th>仓库</th>
+                  <th>MR / PR</th>
+                  <th>Commit</th>
+                  <th>状态</th>
+                  <th>耗时</th>
+                  <th>评论数</th>
+                  <th>时间</th>
+                  <!-- <th>备注</th> -->
+                  <th class="text-end">操作</th>
+                </tr>
+              </thead>
+              <tbody id="reviews-body">
+                <tr><td colspan="8" class="text-secondary">加载中…</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal fade" id="reviewLogModal" tabindex="-1" aria-hidden="true">
+      <div class="modal-dialog modal-xl modal-dialog-scrollable">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h5 class="modal-title">审查日志 · <span id="log-review-id" class="mono text-secondary fs-6"></span></h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="关闭"></button>
+          </div>
+          <div class="modal-body p-0">
+            <pre id="review-log-body" class="mb-0 p-3 small mono bg-dark text-light"
+              style="min-height: 320px; max-height: 70vh; overflow: auto; white-space: pre-wrap; word-break: break-word;">加载中…</pre>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-outline-secondary" id="log-refresh-btn">刷新</button>
+            <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">关闭</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal fade" id="reviewDetailModal" tabindex="-1" aria-hidden="true">
+      <div class="modal-dialog modal-xl modal-dialog-scrollable">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h5 class="modal-title">审查详情</h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="关闭"></button>
+          </div>
+          <div class="modal-body" id="review-detail-body"></div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">关闭</button>
+            <button type="button" class="btn btn-outline-secondary" id="detail-log-btn">查看日志</button>
+            <button type="button" class="btn btn-primary" id="detail-rerun-btn" disabled>重跑</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="js/app-v2.js"></script>
+    <script>
+      CR.mountShell("reviews", "审查记录");
+      let allReviews = [];
+      let detailModal = null;
+      let logModal = null;
+      let detailReviewId = "";
+      let logReviewId = "";
+      let logPollTimer = null;
+
+      function clip(s, n) {
+        s = String(s || "");
+        if (s.length <= n) return s;
+        return s.slice(0, n) + "…";
+      }
+
+      function detailRow(label, value, mono, title) {
+        const v = value == null || value === "" ? "-" : String(value);
+        const titleAttr = title ? ` title="${CR.escapeHtml(title)}"` : "";
+        return `<div class="mb-3">
+          <div class="text-secondary small mb-1">${CR.escapeHtml(label)}</div>
+          <div class="${mono ? "mono" : ""}"${titleAttr} style="white-space:pre-wrap;word-break:break-word">${CR.escapeHtml(v)}</div>
+        </div>`;
+      }
+
+      function renderInlineMarkdown(text) {
+        return text.split("`").map((part, index) => {
+          if (index % 2) return `<code>${CR.escapeHtml(part)}</code>`;
+          return CR.escapeHtml(part).replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+        }).join("");
+      }
+
+      function renderMarkdown(markdown) {
+        const lines = String(markdown || "").replace(/\r\n?/g, "\n").split("\n");
+        const html = [];
+        let paragraph = [];
+        let listOpen = false;
+        let inCode = false;
+        let codeLines = [];
+
+        const flushParagraph = () => {
+          if (!paragraph.length) return;
+          html.push(`<p>${renderInlineMarkdown(paragraph.join(" "))}</p>`);
+          paragraph = [];
+        };
+        const closeList = () => {
+          if (!listOpen) return;
+          html.push("</ul>");
+          listOpen = false;
+        };
+        const flushCode = () => {
+          html.push(`<pre><code>${CR.escapeHtml(codeLines.join("\n"))}</code></pre>`);
+          codeLines = [];
+        };
+
+        lines.forEach((line) => {
+          if (/^```/.test(line)) {
+            if (inCode) {
+              flushCode();
+              inCode = false;
+            } else {
+              flushParagraph();
+              closeList();
+              inCode = true;
+            }
+            return;
+          }
+          if (inCode) {
+            codeLines.push(line);
+            return;
+          }
+          const heading = line.match(/^(#{1,6})\s+(.+)$/);
+          const item = line.match(/^\s*[-*]\s+(.+)$/);
+          if (heading) {
+            flushParagraph();
+            closeList();
+            const level = heading[1].length;
+            html.push(`<h${level}>${renderInlineMarkdown(heading[2])}</h${level}>`);
+          } else if (item) {
+            flushParagraph();
+            if (!listOpen) {
+              html.push("<ul>");
+              listOpen = true;
+            }
+            html.push(`<li>${renderInlineMarkdown(item[1])}</li>`);
+          } else if (/^\s*---+\s*$/.test(line)) {
+            flushParagraph();
+            closeList();
+            html.push("<hr>");
+          } else if (!line.trim()) {
+            flushParagraph();
+            closeList();
+          } else {
+            paragraph.push(line.trim());
+          }
+        });
+        if (inCode) flushCode();
+        flushParagraph();
+        closeList();
+        return html.join("");
+      }
+
+      function emptyReportText(review) {
+        if (review.status === "running") return "报告尚未生成";
+        return "本次审查没有保存报告";
+      }
+
+      async function showDetail(id) {
+        const summary = allReviews.find((x) => x.id === id);
+        if (!summary) return;
+        detailReviewId = id;
+        const body = document.getElementById("review-detail-body");
+        body.innerHTML = `<div class="text-secondary">正在加载审查详情…</div>`;
+        const btn = document.getElementById("detail-rerun-btn");
+        btn.disabled = !summary.commit;
+        document.getElementById("detail-log-btn").onclick = () => {
+          detailModal.hide();
+          showLog(id);
+        };
+        detailModal.show();
+        try {
+          const r = await CR.apiGet(`/api/reviews/${id}`);
+          if (detailReviewId !== id) return;
+          btn.disabled = !r.commit;
+          const report = String(r.report_markdown || "").trim();
+          body.innerHTML = `<div class="row g-3">
+            <div class="col-md-6">${detailRow("仓库", r.repo, true)}${detailRow("MR / PR", r.mr)}${detailRow("Commit", r.commit ? CR.shortSha(r.commit) : "-", true, r.commit)}${detailRow("链接", r.mr_url || "-")}</div>
+            <div class="col-md-6">${detailRow("状态", r.status)}${detailRow("耗时", r.duration_sec ? r.duration_sec + "s" : "-")}${detailRow("评论数", r.comments)}${detailRow("时间", CR.formatTime(r.at))}${detailRow("备注", r.error || "-")}</div>
+          </div>
+          <div class="mt-2">
+            <h6 class="mb-3">AI 审查报告</h6>
+            <div class="review-report${report ? "" : " review-report-empty"}">${report ? renderMarkdown(report) : CR.escapeHtml(emptyReportText(r))}</div>
+          </div>`;
+        } catch (e) {
+          if (detailReviewId === id) body.textContent = "加载失败：" + String(e.message || e);
+        }
+      }
+
+      async function loadReviewLog(id, silent) {
+        const pre = document.getElementById("review-log-body");
+        if (!silent) pre.textContent = "加载中…";
+        try {
+          const data = await CR.apiGet(`/api/reviews/${id}/log`);
+          const text = (data && data.log) || "";
+          pre.textContent = text.trim() ? text : "（暂无日志，可能审查尚未开始或日志文件未生成）";
+        } catch (e) {
+          pre.textContent = "加载失败：" + String(e.message || e);
+        }
+      }
+
+      function stopLogPoll() {
+        if (logPollTimer) {
+          clearInterval(logPollTimer);
+          logPollTimer = null;
+        }
+      }
+
+      function showLog(id) {
+        logReviewId = id;
+        document.getElementById("log-review-id").textContent = id;
+        logModal.show();
+        loadReviewLog(id, false);
+        stopLogPoll();
+        const r = allReviews.find((x) => x.id === id);
+        if (r && r.status === "running") {
+          logPollTimer = setInterval(() => loadReviewLog(id, true), 2000);
+        }
+      }
+
+      function renderReviews() {
+        const status = document.getElementById("filter-status").value;
+        const rows = allReviews.filter((r) => !status || r.status === status);
+        document.getElementById("reviews-body").innerHTML = rows
+          .map((r) => {
+            return `<tr>
+              <td class="mono" title="${CR.escapeHtml(r.repo)}">${CR.escapeHtml(clip(r.repo, 20))}</td>
+              <td>${CR.escapeHtml(r.mr)}</td>
+              <td class="mono" title="${CR.escapeHtml(r.commit)}">${CR.escapeHtml(CR.shortSha(r.commit))}</td>
+              <td>${CR.statusBadge(r.status)}</td>
+              <td>${r.duration_sec ? r.duration_sec + "s" : "-"}</td>
+              <td>${r.comments}</td>
+              <td class="text-secondary">${CR.formatTime(r.at)}</td>
+              <td class="text-end text-nowrap">
+                <button class="btn btn-sm btn-outline-secondary" data-log="${CR.escapeHtml(r.id)}">日志</button>
+                <button class="btn btn-sm btn-outline-primary" data-detail="${CR.escapeHtml(r.id)}">详情</button>
+                <button class="btn btn-sm btn-outline-secondary" data-rerun="${CR.escapeHtml(r.id)}" ${r.commit ? "" : "disabled"}>重跑</button>
+              </td>
+            </tr>`;
+          })
+          .join("") || `<tr><td colspan="8" class="text-secondary">无匹配记录</td></tr>`;
+
+        document.querySelectorAll("[data-detail]").forEach((btn) => {
+          btn.addEventListener("click", () => showDetail(btn.dataset.detail));
+        });
+        document.querySelectorAll("[data-log]").forEach((btn) => {
+          btn.addEventListener("click", () => showLog(btn.dataset.log));
+        });
+        document.querySelectorAll("[data-rerun]").forEach((btn) => {
+          btn.addEventListener("click", () => rerun(btn.dataset.rerun, btn));
+        });
+      }
+
+      async function loadReviews() {
+        allReviews = await CR.apiGet("/api/reviews");
+        renderReviews();
+      }
+
+      async function rerun(id, btn) {
+        if (btn) btn.disabled = true;
+        try {
+          await CR.apiSend("POST", `/api/reviews/${id}/rerun`);
+          CR.showToast("已触发重跑，正在执行", "success");
+          // The job runs asynchronously; reload once it has had time to update.
+          setTimeout(() => loadReviews().catch(() => {}), 2000);
+        } catch (e) {
+          CR.showToast(String(e), "danger");
+          if (btn) btn.disabled = false;
+        }
+      }
+
+      (async () => {
+        detailModal = new bootstrap.Modal(document.getElementById("reviewDetailModal"));
+        logModal = new bootstrap.Modal(document.getElementById("reviewLogModal"));
+        document.getElementById("reviewLogModal").addEventListener("hidden.bs.modal", stopLogPoll);
+        document.getElementById("log-refresh-btn").addEventListener("click", () => {
+          if (logReviewId) loadReviewLog(logReviewId, false);
+        });
+        document.getElementById("detail-rerun-btn").addEventListener("click", async () => {
+          if (!detailReviewId) return;
+          const btn = document.getElementById("detail-rerun-btn");
+          await rerun(detailReviewId, btn);
+          detailModal.hide();
+        });
+        document.getElementById("refresh-btn").addEventListener("click", () => {
+          loadReviews().catch((e) => CR.showToast(String(e), "danger"));
+        });
+        document.getElementById("filter-status").addEventListener("change", renderReviews);
+        await loadReviews();
+      })().catch((e) => CR.showToast(String(e), "danger"));
+    </script>
+  </body>
+</html>

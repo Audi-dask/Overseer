@@ -17,6 +17,11 @@ type InlineComment struct {
 	Severity       string
 }
 
+type BranchHead struct {
+	CommitID string
+	WebURL   string
+}
+
 // Provider deliberately exposes only two categories of VCS mutations:
 // webhook lifecycle management and posting AI review comments. Implementations
 // must keep all other repository, branch, commit and merge-request operations
@@ -26,6 +31,7 @@ type Provider interface {
 	// SearchRepos finds projects by keyword (group path/name or project name). Results are
 	// candidates only — callers decide what to persist.
 	SearchRepos(ctx context.Context, instance *model.Instance, token, query string) ([]model.Repo, error)
+	BranchHead(ctx context.Context, instance *model.Instance, token string, repo *model.Repo, branch string) (*BranchHead, error)
 	EnsureWebhook(ctx context.Context, instance *model.Instance, token string, repo *model.Repo, callbackURL, secret string) (webhookID string, err error)
 	DeleteWebhook(ctx context.Context, instance *model.Instance, token string, repo *model.Repo) error
 	ParseEvent(payload []byte, headers map[string]string, secret string) (*model.ReviewTrigger, error)

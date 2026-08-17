@@ -126,17 +126,18 @@ const (
 )
 
 type Review struct {
-	ID          string       `json:"id"`
-	RepoID      string       `json:"repo_id,omitempty"`
-	Repo        string       `json:"repo"`
-	MRID        string       `json:"mr"`
-	CommitSHA   string       `json:"commit"`
-	Status      ReviewStatus `json:"status"`
-	DurationSec int          `json:"duration_sec"`
-	Comments    int          `json:"comments"`
-	Error       string       `json:"error,omitempty"`
-	MRURL       string       `json:"mr_url,omitempty"`
-	CreatedAt   time.Time    `json:"at"`
+	ID             string       `json:"id"`
+	RepoID         string       `json:"repo_id,omitempty"`
+	Repo           string       `json:"repo"`
+	MRID           string       `json:"mr"`
+	CommitSHA      string       `json:"commit"`
+	Status         ReviewStatus `json:"status"`
+	DurationSec    int          `json:"duration_sec"`
+	Comments       int          `json:"comments"`
+	Error          string       `json:"error,omitempty"`
+	MRURL          string       `json:"mr_url,omitempty"`
+	ReportMarkdown string       `json:"report_markdown,omitempty"`
+	CreatedAt      time.Time    `json:"at"`
 }
 
 type ReviewTrigger struct {

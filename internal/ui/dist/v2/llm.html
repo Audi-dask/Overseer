@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>LLM · Overseer</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" />
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet" />
+    <link href="css/app-v2.css" rel="stylesheet" />
+  </head>
+  <body>
+    <div id="app" class="app-shell">
+      <div id="page-content" hidden>
+        <div class="boundary-banner">
+          OpenAI 兼容 / Anthropic 端点；默认模型优先，Key 加密存储。
+        </div>
+
+        <div class="row g-3 mb-3" id="routing-cards">
+          <div class="col-md-6">
+            <div class="stat-card">
+              <div class="label">默认模型（主）</div>
+              <div class="value fs-5" id="primary-name">未设置</div>
+              <div class="hint mono" id="primary-hint">审查优先使用</div>
+            </div>
+          </div>
+          <div class="col-md-6">
+            <div class="stat-card">
+              <div class="label">备用模型</div>
+              <div class="value fs-5" id="fallback-name">未设置</div>
+              <div class="hint mono" id="fallback-hint">主模型不可用时启用</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-header">
+            <h2>模型 Provider</h2>
+            <button class="btn btn-sm btn-primary" data-bs-toggle="modal" data-bs-target="#llmModal">
+              <i class="bi bi-plus-lg"></i> 添加 Provider
+            </button>
+          </div>
+          <div class="table-wrap">
+            <table class="table table-hover mb-0">
+              <thead class="table-light">
+                <tr>
+                  <th>名称</th>
+                  <th>类型</th>
+                  <th>Base URL</th>
+                  <th>Model</th>
+                  <th>API Key</th>
+                  <th>角色</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="llm-body">
+                <tr><td colspan="7" class="text-secondary">加载中…</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal fade" id="llmModal" tabindex="-1" aria-hidden="true">
+      <div class="modal-dialog">
+        <form class="modal-content" id="llm-form">
+          <div class="modal-header">
+            <h5 class="modal-title">添加 / 编辑 Provider</h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+          </div>
+          <div class="modal-body">
+            <input type="hidden" name="id" />
+            <div class="mb-3">
+              <label class="form-label">名称</label>
+              <input class="form-control" name="name" required placeholder="公司网关" />
+            </div>
+            <div class="mb-3">
+              <label class="form-label">类型</label>
+              <select class="form-select" name="kind" required>
+                <option value="openai_compatible">OpenAI 兼容</option>
+                <option value="anthropic">Anthropic</option>
+              </select>
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Base URL</label>
+              <input class="form-control" name="base_url" required placeholder="https://api.example.com/v1" />
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Model</label>
+              <input class="form-control" name="model" required placeholder="qwen-max" />
+            </div>
+            <div class="mb-3">
+              <label class="form-label">API Key</label>
+              <input class="form-control" name="api_key" type="password" required />
+            </div>
+            <fieldset class="mb-0">
+              <legend class="form-label fs-6 mb-2">角色</legend>
+              <div class="form-check">
+                <input class="form-check-input" type="radio" name="role" id="role_none" value="none" checked />
+                <label class="form-check-label" for="role_none">普通（不参与主备路由）</label>
+              </div>
+              <div class="form-check">
+                <input class="form-check-input" type="radio" name="role" id="role_primary" value="primary" />
+                <label class="form-check-label" for="role_primary">默认模型（主）— 审查优先使用</label>
+              </div>
+              <div class="form-check">
+                <input class="form-check-input" type="radio" name="role" id="role_fallback" value="fallback" />
+                <label class="form-check-label" for="role_fallback">备用模型 — 主模型不可用时降级</label>
+              </div>
+              <div class="form-text mt-2">全局只应各有一个默认与备用；设为新角色时会顶替原有同角色 Provider。</div>
+            </fieldset>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">取消</button>
+            <button type="submit" class="btn btn-primary">保存</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="js/app-v2.js"></script>
+    <script>
+      CR.mountShell("llm", "LLM 配置");
+      const kindLabel = { openai_compatible: "OpenAI 兼容", anthropic: "Anthropic" };
+      const roleBadge = {
+        primary: '<span class="badge text-bg-primary">默认（主）</span>',
+        fallback: '<span class="badge text-bg-warning text-dark">备用</span>',
+        none: '<span class="text-secondary">-</span>',
+      };
+
+      function renderRouting(list) {
+        const primary = list.find((p) => p.role === "primary");
+        const fallback = list.find((p) => p.role === "fallback");
+        document.getElementById("primary-name").textContent = primary
+          ? primary.name
+          : "未设置";
+        document.getElementById("primary-hint").textContent = primary
+          ? primary.model + " · " + primary.base_url
+          : "请至少指定一个默认模型";
+        document.getElementById("fallback-name").textContent = fallback
+          ? fallback.name
+          : "未设置";
+        document.getElementById("fallback-hint").textContent = fallback
+          ? fallback.model + " · " + fallback.base_url
+          : "建议配置备用，避免主模型故障导致审查中断";
+      }
+
+      const llmModal = document.getElementById("llmModal");
+      const llmForm = document.getElementById("llm-form");
+      let providers = [];
+
+      function fillForm(p) {
+        llmForm.reset();
+        llmForm.elements.id.value = p ? p.id : "";
+        if (!p) {
+          llmForm.elements.api_key.required = true;
+          return;
+        }
+        llmForm.elements.name.value = p.name;
+        llmForm.elements.kind.value = p.kind;
+        llmForm.elements.base_url.value = p.base_url;
+        llmForm.elements.model.value = p.model;
+        llmForm.elements.api_key.required = false;
+        llmForm.elements.api_key.placeholder = "留空表示不修改";
+        llmForm.querySelector(`input[name="role"][value="${p.role || "none"}"]`).checked = true;
+      }
+
+      async function loadProviders() {
+        providers = await CR.apiGet("/api/llm-providers");
+        renderRouting(providers);
+        const body = document.getElementById("llm-body");
+        if (!providers.length) {
+          body.innerHTML = `<tr><td colspan="7" class="text-secondary">还没有 Provider，点右上角添加。</td></tr>`;
+          return;
+        }
+        body.innerHTML = providers
+          .map(
+            (p) => `<tr>
+              <td>${CR.escapeHtml(p.name)}</td>
+              <td>${CR.escapeHtml(kindLabel[p.kind] || p.kind)}</td>
+              <td class="mono">${CR.escapeHtml(p.base_url)}</td>
+              <td class="mono">${CR.escapeHtml(p.model)}</td>
+              <td class="mono">${CR.escapeHtml(p.api_key)}</td>
+              <td>${roleBadge[p.role] || roleBadge.none}</td>
+              <td class="text-end">
+                <button class="btn btn-sm btn-outline-secondary edit-btn" type="button" data-id="${CR.escapeHtml(p.id)}">编辑</button>
+                <button class="btn btn-sm btn-outline-danger del-btn" type="button" data-id="${CR.escapeHtml(p.id)}" data-name="${CR.escapeHtml(p.name)}">删除</button>
+              </td>
+            </tr>`
+          )
+          .join("");
+        body.querySelectorAll(".edit-btn").forEach((el) => {
+          el.addEventListener("click", () => {
+            fillForm(providers.find((p) => p.id === el.dataset.id));
+            bootstrap.Modal.getOrCreateInstance(llmModal).show();
+          });
+        });
+        body.querySelectorAll(".del-btn").forEach((el) => {
+          el.addEventListener("click", async () => {
+            if (!confirm(`删除 Provider「${el.dataset.name}」？`)) return;
+            try {
+              await CR.apiSend("DELETE", `/api/llm-providers/${el.dataset.id}`);
+              CR.showToast("Provider 已删除", "success");
+              await loadProviders();
+            } catch (err) {
+              CR.showToast(String(err.message || err), "danger");
+            }
+          });
+        });
+      }
+
+      document.querySelector('[data-bs-target="#llmModal"]')?.addEventListener("click", () => fillForm(null));
+
+      loadProviders().catch((e) => {
+        document.getElementById("llm-body").innerHTML =
+          `<tr><td colspan="7" class="text-danger">加载失败：${CR.escapeHtml(e.message || e)}</td></tr>`;
+      });
+
+      llmForm.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const fd = new FormData(e.target);
+        const role = fd.get("role");
+        try {
+          await CR.apiSend("POST", "/api/llm-providers", {
+            id: fd.get("id") || "",
+            name: fd.get("name"),
+            kind: fd.get("kind"),
+            base_url: fd.get("base_url"),
+            model: fd.get("model"),
+            api_key: fd.get("api_key"),
+            role,
+          });
+          bootstrap.Modal.getInstance(llmModal)?.hide();
+          CR.showToast(
+            role === "primary" ? "已设为默认模型" : role === "fallback" ? "已设为备用模型" : "Provider 已保存",
+            "success"
+          );
+          await loadProviders();
+        } catch (err) {
+          CR.showToast(String(err.message || err), "danger");
+        }
+      });
+    </script>
+  </body>
+</html>

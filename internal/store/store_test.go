@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"path/filepath"
 	"testing"
 	"time"
@@ -22,6 +23,67 @@ func openTestStore(t *testing.T) *Store {
 	}
 	t.Cleanup(func() { _ = st.Close() })
 	return st
+}
+
+func TestReviewReportMigrationAndQueries(t *testing.T) {
+	box, err := secretbox.NewFromEnv()
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "legacy.db")
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.Exec(`CREATE TABLE reviews (
+		id TEXT PRIMARY KEY, repo_id TEXT NOT NULL DEFAULT '', repo TEXT NOT NULL,
+		mr_id TEXT NOT NULL, commit_sha TEXT NOT NULL, status TEXT NOT NULL,
+		duration_sec INTEGER NOT NULL DEFAULT 0, comments INTEGER NOT NULL DEFAULT 0,
+		error TEXT NOT NULL DEFAULT '', mr_url TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL
+	)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	st, err := Open(path, box)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	var columnCount int
+	if err := st.db.QueryRow(`SELECT COUNT(1) FROM pragma_table_info('reviews') WHERE name='report_markdown'`).Scan(&columnCount); err != nil {
+		t.Fatal(err)
+	}
+	if columnCount != 1 {
+		t.Fatalf("report_markdown columns = %d, want 1", columnCount)
+	}
+
+	ctx := context.Background()
+	review := &model.Review{ID: "report", Repo: "group/repo", MRID: "12", CommitSHA: "abcdef", Status: model.ReviewRunning}
+	if err := st.InsertReview(ctx, review); err != nil {
+		t.Fatal(err)
+	}
+	report := "## Overseer Review\n\n- **严重程度**: high"
+	if err := st.FinishReview(ctx, review.ID, model.ReviewSuccess, 9, 1, "", report); err != nil {
+		t.Fatal(err)
+	}
+	got, err := st.GetReview(ctx, review.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ReportMarkdown != report {
+		t.Fatalf("report = %q, want %q", got.ReportMarkdown, report)
+	}
+	list, err := st.ListReviews(ctx, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 1 || list[0].ReportMarkdown != "" {
+		t.Fatalf("list reviews = %#v, want report omitted", list)
+	}
 }
 
 func TestReviewRetentionSettings(t *testing.T) {

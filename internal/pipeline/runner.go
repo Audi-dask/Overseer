@@ -102,12 +102,13 @@ func (r *Runner) Handle(ctx context.Context, job queue.Job) {
 		return
 	}
 
-	content, inline, commentCount, err := r.runAgent(ctx, inst, token, repo, tr, concurrency)
+	reportMarkdown, inline, commentCount, err := r.runAgent(ctx, inst, token, repo, tr, concurrency)
 	if err != nil {
 		r.fail(ctx, rec.ID, repo, tr, start, err.Error())
 		return
 	}
 	postMR := shouldPostMRComment(repo, tr)
+	commentBody := reportMarkdown
 	if postMR {
 		anchored := make([]vcs.InlineComment, 0, len(inline))
 		failedInline := make([]vcs.InlineComment, 0, len(inline))
@@ -127,13 +128,13 @@ func (r *Runner) Handle(ctx context.Context, job queue.Job) {
 				runlog.Printf(ctx, "pipeline: inline discussions ok count=%d", len(anchored)-len(failed))
 			}
 		}
-		content = formatMRSummary(inline, failedInline)
-		if err := prov.PostComment(ctx, inst, token, repo, tr.MRID, content); err != nil {
+		commentBody = formatMRSummary(inline, failedInline)
+		if err := prov.PostComment(ctx, inst, token, repo, tr.MRID, commentBody); err != nil {
 			r.fail(ctx, rec.ID, repo, tr, start, "post comment: "+err.Error())
 			return
 		}
 	} else if tr.CommitSHA != "" {
-		if err := prov.PostCommitComment(ctx, inst, token, repo, tr.CommitSHA, content); err != nil {
+		if err := prov.PostCommitComment(ctx, inst, token, repo, tr.CommitSHA, commentBody); err != nil {
 			r.fail(ctx, rec.ID, repo, tr, start, "post commit comment: "+err.Error())
 			return
 		}
@@ -149,7 +150,7 @@ func (r *Runner) Handle(ctx context.Context, job queue.Job) {
 		runlog.Printf(ctx, "pipeline: 无 MR / Commit，跳过 GitLab 评论回填")
 	}
 	if err := r.finishReview(ctx, rec.ID, model.ReviewSuccess,
-		int(time.Since(start).Seconds()), commentCount, ""); err != nil {
+		int(time.Since(start).Seconds()), commentCount, "", reportMarkdown); err != nil {
 		runlog.Printf(ctx, "pipeline: finish success state: %v", err)
 	}
 	runlog.Printf(ctx, "pipeline: ok %s !%s %s mode=agent comments=%d",
@@ -244,16 +245,16 @@ func (r *Runner) reviewGuidance(ctx context.Context, repo *model.Repo, tr model.
 func (r *Runner) fail(ctx context.Context, reviewID string, repo *model.Repo, tr model.ReviewTrigger, start time.Time, msg string) {
 	runlog.Printf(ctx, "pipeline: fail %s !%s: %s", repo.FullName, tr.MRID, msg)
 	if err := r.finishReview(ctx, reviewID, model.ReviewFailed,
-		int(time.Since(start).Seconds()), 0, msg); err != nil {
+		int(time.Since(start).Seconds()), 0, msg, ""); err != nil {
 		runlog.Printf(ctx, "pipeline: finish failed state: %v", err)
 	}
 	r.sendNotify(ctx, repo, tr, "failed", msg)
 }
 
-func (r *Runner) finishReview(ctx context.Context, reviewID string, status model.ReviewStatus, durationSec, commentCount int, errMsg string) error {
+func (r *Runner) finishReview(ctx context.Context, reviewID string, status model.ReviewStatus, durationSec, commentCount int, errMsg, reportMarkdown string) error {
 	finishCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 	defer cancel()
-	return r.Store.FinishReview(finishCtx, reviewID, status, durationSec, commentCount, errMsg)
+	return r.Store.FinishReview(finishCtx, reviewID, status, durationSec, commentCount, errMsg, reportMarkdown)
 }
 
 func (r *Runner) sendNotify(ctx context.Context, repo *model.Repo, tr model.ReviewTrigger, status, summary string) {

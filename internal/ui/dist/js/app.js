@@ -83,6 +83,9 @@ CR.mountShell = function (activeId, title) {
       </div>
       <nav class="sidebar-nav">${links}</nav>
       <div class="sidebar-footer">
+        <a class="btn btn-sm btn-outline-light w-100 mb-2" id="switch-v2" href="/v2/index.html">
+          <i class="bi bi-arrow-left-right"></i> 切换 2.0
+        </a>
         <span>© 2026 Overseer</span>
         <span> · </span>
         <a href="https://github.com/Audi-dask/Overseer.git" target="_blank" rel="noopener noreferrer">GitHub</a>
@@ -99,6 +102,11 @@ CR.mountShell = function (activeId, title) {
       <div class="content">${contentHTML}</div>
     </div>
   `;
+
+  document.getElementById("switch-v2")?.setAttribute(
+    "href",
+    "/v2/" + (location.pathname.split("/").pop() || "index.html")
+  );
 
   document.getElementById("btn-logout")?.addEventListener("click", () => {
     CR.clearToken();

@@ -8,3 +8,6 @@ data/workspaces/
 参考/
 
 AGENTS.md
+.agents/
+.claude/
+skills-lock.json

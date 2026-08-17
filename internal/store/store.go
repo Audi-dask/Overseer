@@ -103,6 +103,7 @@ CREATE TABLE IF NOT EXISTS reviews (
   comments INTEGER NOT NULL DEFAULT 0,
   error TEXT NOT NULL DEFAULT '',
   mr_url TEXT NOT NULL DEFAULT '',
+  report_markdown TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL
 );
 
@@ -148,7 +149,10 @@ CREATE TABLE IF NOT EXISTS notify_group_channels (
 	if _, err := s.db.Exec(schema); err != nil {
 		return err
 	}
-	return s.ensureRepoTriggerColumns()
+	if err := s.ensureRepoTriggerColumns(); err != nil {
+		return err
+	}
+	return s.ensureReviewColumns()
 }
 
 func (s *Store) ensureRepoTriggerColumns() error {
@@ -166,6 +170,14 @@ func (s *Store) ensureRepoTriggerColumns() error {
 			}
 			return err
 		}
+	}
+	return nil
+}
+
+func (s *Store) ensureReviewColumns() error {
+	_, err := s.db.Exec(`ALTER TABLE reviews ADD COLUMN report_markdown TEXT NOT NULL DEFAULT ''`)
+	if err != nil && !strings.Contains(strings.ToLower(err.Error()), "duplicate column") {
+		return err
 	}
 	return nil
 }
@@ -641,9 +653,9 @@ func (s *Store) GetReview(ctx context.Context, id string) (*model.Review, error)
 	var r model.Review
 	var created string
 	err := s.db.QueryRowContext(ctx, `
-SELECT id, repo_id, repo, mr_id, commit_sha, status, duration_sec, comments, error, mr_url, created_at
+SELECT id, repo_id, repo, mr_id, commit_sha, status, duration_sec, comments, error, mr_url, report_markdown, created_at
 FROM reviews WHERE id=?`, id).Scan(&r.ID, &r.RepoID, &r.Repo, &r.MRID, &r.CommitSHA, &r.Status,
-		&r.DurationSec, &r.Comments, &r.Error, &r.MRURL, &created)
+		&r.DurationSec, &r.Comments, &r.Error, &r.MRURL, &r.ReportMarkdown, &created)
 	if err != nil {
 		return nil, err
 	}
@@ -659,18 +671,18 @@ func (s *Store) InsertReview(ctx context.Context, r *model.Review) error {
 		r.CreatedAt = time.Now().UTC()
 	}
 	_, err := s.db.ExecContext(ctx, `
-INSERT INTO reviews(id, repo_id, repo, mr_id, commit_sha, status, duration_sec, comments, error, mr_url, created_at)
-VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
-		r.ID, r.RepoID, r.Repo, r.MRID, r.CommitSHA, r.Status, r.DurationSec, r.Comments, r.Error, r.MRURL, r.CreatedAt.Format(time.RFC3339))
+INSERT INTO reviews(id, repo_id, repo, mr_id, commit_sha, status, duration_sec, comments, error, mr_url, report_markdown, created_at)
+VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`,
+		r.ID, r.RepoID, r.Repo, r.MRID, r.CommitSHA, r.Status, r.DurationSec, r.Comments, r.Error, r.MRURL, r.ReportMarkdown, r.CreatedAt.Format(time.RFC3339))
 	return err
 }
 
 // FinishReview closes out the row created when the run started, so one review
 // attempt stays one row instead of leaving a dangling "running" record.
-func (s *Store) FinishReview(ctx context.Context, id string, status model.ReviewStatus, durationSec, comments int, errMsg string) error {
+func (s *Store) FinishReview(ctx context.Context, id string, status model.ReviewStatus, durationSec, comments int, errMsg, reportMarkdown string) error {
 	_, err := s.db.ExecContext(ctx, `
-UPDATE reviews SET status=?, duration_sec=?, comments=?, error=? WHERE id=?`,
-		status, durationSec, comments, errMsg, id)
+UPDATE reviews SET status=?, duration_sec=?, comments=?, error=?, report_markdown=? WHERE id=?`,
+		status, durationSec, comments, errMsg, reportMarkdown, id)
 	return err
 }
 

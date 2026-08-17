@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>服务设置 · Overseer</title>
+    <link rel="icon" href="../img/overseer.svg" type="image/svg+xml" />
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" />
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet" />
+    <link href="css/app-v2.css" rel="stylesheet" />
+  </head>
+  <body>
+    <div id="app" class="app-shell">
+      <div id="page-content" hidden>
+        <div class="boundary-banner">
+          回调地址、钩子 Secret、并发与防抖；VCS 回调走 <code>/hooks/…</code>。
+        </div>
+
+        <div class="row g-3 mb-3" id="status-cards"></div>
+
+        <div class="panel mb-3">
+          <div class="panel-header">
+            <h2>回调与安全</h2>
+            <button type="button" class="btn btn-sm btn-primary" id="btn-save">保存</button>
+          </div>
+          <div class="p-3">
+            <div class="mb-3">
+              <div class="setting-label-row">
+                <label class="form-label mb-0" for="callback-base">对外回调 Base URL</label>
+                <button
+                  type="button"
+                  class="setting-help-button"
+                  id="callback-base-help"
+                  data-bs-toggle="tooltip"
+                  data-bs-placement="right"
+                  data-bs-html="true"
+                  title="<div class='text-start'><strong>GitLab 项目钩子要回调的公网根地址</strong><br/>填 Overseer 对外可访问的 HTTPS 域名，不要尾斜杠。<br/>实际钩子 URL 为：<br/><code>{Base URL}/hooks/{instance_id}</code><br/><br/>要求：GitLab 服务器能访问该地址（内网部署需同一网络或反向代理）。<br/>修改后已开启 Review 的仓库会在下次保存触发来源或重开 Review 时同步钩子。</div>"
+                  aria-label="什么是回调 Base URL"
+                >
+                  <i class="bi bi-question-circle" aria-hidden="true"></i>
+                </button>
+              </div>
+              <input class="form-control mono" id="callback-base" placeholder="https://review.example.com" />
+              <div class="form-text">完整钩子地址形如：<code id="hook-example">…/hooks/{instance_id}</code></div>
+            </div>
+            <div class="mb-3">
+              <div class="setting-label-row">
+                <label class="form-label mb-0" for="webhook-secret">事件钩子共享 Secret</label>
+                <button
+                  type="button"
+                  class="setting-help-button"
+                  id="webhook-secret-help"
+                  data-bs-toggle="tooltip"
+                  data-bs-placement="right"
+                  data-bs-html="true"
+                  title="<div class='text-start'><strong>这是给 GitLab/GitHub 回调用的共享口令</strong><br/>开启仓库 Review 时，服务会把这个 Secret 写进 VCS 事件钩子。<br/>GitLab 回调时带上 Token，服务用来校验请求真的来自你的实例，防止陌生人伪造审查触发。<br/><br/>它不是管理台登录密码；登录请用右上角账号的 JWT 登录。</div>"
+                  aria-label="什么是事件钩子共享 Secret"
+                >
+                  <i class="bi bi-question-circle" aria-hidden="true"></i>
+                </button>
+              </div>
+              <input class="form-control mono" id="webhook-secret" type="password" autocomplete="off" />
+              <div class="form-text">落库加密存储。建议设一串随机字符串；留空则不做钩子 Token 校验（仅适合内网调试）。</div>
+            </div>
+            <div class="row g-3">
+              <div class="col-md-4">
+                <label class="form-label" for="max-concurrency">Agent 审查并发上限</label>
+                <input class="form-control" id="max-concurrency" type="number" min="1" max="64" />
+              </div>
+              <div class="col-md-4">
+                <label class="form-label" for="debounce-sec">同 MR 防抖窗口（秒）</label>
+                <input class="form-control" id="debounce-sec" type="number" min="0" max="600" />
+              </div>
+              <div class="col-md-4">
+                <label class="form-label" for="review-retention-days">审查日志保留天数</label>
+                <input class="form-control" id="review-retention-days" type="number" min="0" required />
+                <div class="form-text">默认 30 天；填 0 表示永久保留。过期记录与对应日志同步删除。</div>
+              </div>
+            </div>
+            <div class="form-text mt-2">服务仅提供 Agent 审查：会 shallow clone MR 提交到本地，通过工具读取代码并回填评论。</div>
+          </div>
+        </div>
+
+        <div class="panel mb-3">
+          <div class="panel-header">
+            <h2>管理员账号</h2>
+            <button type="button" class="btn btn-sm btn-outline-primary" id="btn-password">修改密码</button>
+          </div>
+          <div class="p-3">
+            <div class="mb-3">
+              <label class="form-label">当前用户</label>
+              <input class="form-control" id="admin-username" readonly />
+            </div>
+            <div class="row g-3">
+              <div class="col-md-4">
+                <label class="form-label" for="old-password">当前密码</label>
+                <input class="form-control" id="old-password" type="password" autocomplete="current-password" />
+              </div>
+              <div class="col-md-4">
+                <label class="form-label" for="new-password">新密码</label>
+                <input class="form-control" id="new-password" type="password" autocomplete="new-password" minlength="6" />
+              </div>
+              <div class="col-md-4">
+                <label class="form-label" for="new-password2">确认新密码</label>
+                <input class="form-control" id="new-password2" type="password" autocomplete="new-password" minlength="6" />
+              </div>
+            </div>
+            <div class="form-text mt-2">单用户模式：前端每次 API 请求携带 JWT。改密成功后继续使用当前会话，无需立刻重登。</div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-header"><h2>运行时状态（只读）</h2></div>
+          <div class="table-wrap">
+            <table class="table mb-0">
+              <tbody id="runtime-body"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="js/app-v2.js"></script>
+    <script>
+      CR.mountShell("settings", "服务设置");
+
+      function maskSecret(s) {
+        if (!s) return "未配置";
+        if (s.length <= 8) return "••••••••";
+        return s.slice(0, 4) + "••••" + s.slice(-4);
+      }
+
+      const helpTooltips = ["webhook-secret-help", "callback-base-help"]
+        .map((id) => document.getElementById(id))
+        .filter(Boolean)
+        .map((element) => bootstrap.Tooltip.getOrCreateInstance(element, {
+          html: true,
+          sanitize: false,
+          trigger: "click",
+          container: document.body,
+          boundary: "viewport",
+          customClass: "settings-help-tooltip",
+        }));
+
+      document.addEventListener("click", (event) => {
+        if (event.target.closest(".setting-help-button, .tooltip")) return;
+        helpTooltips.forEach((tooltip) => tooltip.hide());
+      });
+
+      (async () => {
+        const s = await CR.apiGet("/api/settings");
+        document.getElementById("callback-base").value = s.callback_base_url || "";
+        document.getElementById("webhook-secret").value = s.webhook_secret || "";
+        document.getElementById("max-concurrency").value = s.max_concurrency ?? 8;
+        document.getElementById("debounce-sec").value = s.debounce_sec ?? 30;
+        document.getElementById("review-retention-days").value = s.review_retention_days ?? 30;
+        document.getElementById("admin-username").value = s.admin_username || "admin";
+        const base = (s.callback_base_url || "https://review.example.com").replace(/\/$/, "");
+        document.getElementById("hook-example").textContent = base + "/hooks/{instance_id}";
+
+        document.getElementById("status-cards").innerHTML = `
+          <div class="col-6 col-lg-3"><div class="stat-card"><div class="label">回调地址</div><div class="value fs-6">${s.callback_base_url ? "已配置" : "未配置"}</div></div></div>
+          <div class="col-6 col-lg-3"><div class="stat-card"><div class="label">钩子 Secret</div><div class="value fs-6">${s.webhook_secret ? "已配置" : "未配置"}</div></div></div>
+          <div class="col-6 col-lg-3"><div class="stat-card"><div class="label">审查引擎</div><div class="value fs-6">Agent</div></div></div>
+          <div class="col-6 col-lg-3"><div class="stat-card"><div class="label">管理台鉴权</div><div class="value fs-6">JWT 已开启</div></div></div>
+        `;
+
+        const runtime = s.runtime || {};
+        document.getElementById("runtime-body").innerHTML = `
+          <tr><th class="w-25">版本</th><td class="mono">${CR.escapeHtml(runtime.version || "-")}</td></tr>
+          <tr><th>监听</th><td class="mono">${CR.escapeHtml(runtime.listen || "-")}</td></tr>
+          <tr><th>Webhook Secret 掩码</th><td class="mono">${CR.escapeHtml(maskSecret(s.webhook_secret))}</td></tr>
+        `;
+      })().catch((e) => CR.showToast(String(e), "danger"));
+
+      document.getElementById("callback-base").addEventListener("input", (e) => {
+        const base = e.target.value.replace(/\/$/, "") || "https://review.example.com";
+        document.getElementById("hook-example").textContent = base + "/hooks/{instance_id}";
+      });
+
+      document.getElementById("btn-save").addEventListener("click", async () => {
+        try {
+          const retentionRaw = document.getElementById("review-retention-days").value.trim();
+          if (retentionRaw === "") {
+            CR.showToast("请填写审查日志保留天数；填 0 表示永久保留", "danger");
+            return;
+          }
+          const retentionDays = Number(retentionRaw);
+          if (!Number.isInteger(retentionDays) || retentionDays < 0) {
+            CR.showToast("审查日志保留天数必须是大于等于 0 的整数", "danger");
+            return;
+          }
+          await CR.apiSend("PUT", "/api/settings", {
+            callback_base_url: document.getElementById("callback-base").value.replace(/\/$/, ""),
+            webhook_secret: document.getElementById("webhook-secret").value,
+            max_concurrency: Number(document.getElementById("max-concurrency").value) || 8,
+            debounce_sec: Number(document.getElementById("debounce-sec").value) || 30,
+            review_retention_days: retentionDays,
+          });
+          CR.showToast("服务设置已保存（并发/防抖需重启生效，保留策略定期自动执行）", "success");
+        } catch (err) {
+          CR.showToast(String(err.message || err), "danger");
+        }
+      });
+
+      document.getElementById("btn-password").addEventListener("click", async () => {
+        const oldPassword = document.getElementById("old-password").value;
+        const newPassword = document.getElementById("new-password").value;
+        const newPassword2 = document.getElementById("new-password2").value;
+        if (!oldPassword || !newPassword) {
+          CR.showToast("请填写当前密码和新密码", "danger");
+          return;
+        }
+        if (newPassword !== newPassword2) {
+          CR.showToast("两次新密码不一致", "danger");
+          return;
+        }
+        try {
+          await CR.apiSend("POST", "/api/auth/password", {
+            old_password: oldPassword,
+            new_password: newPassword,
+          });
+          document.getElementById("old-password").value = "";
+          document.getElementById("new-password").value = "";
+          document.getElementById("new-password2").value = "";
+          CR.showToast("密码已更新", "success");
+        } catch (err) {
+          CR.showToast(String(err.message || err), "danger");
+        }
+      });
+    </script>
+  </body>
+</html>

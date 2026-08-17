@@ -1,11 +1,45 @@
 package pipeline
 
 import (
+	"context"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/Audi-dask/Overseer/internal/model"
+	"github.com/Audi-dask/Overseer/internal/secretbox"
+	"github.com/Audi-dask/Overseer/internal/store"
 	"github.com/Audi-dask/Overseer/internal/vcs"
 )
+
+func TestFinishReviewPersistsReport(t *testing.T) {
+	box, err := secretbox.NewFromEnv()
+	if err != nil {
+		t.Fatal(err)
+	}
+	st, err := store.Open(filepath.Join(t.TempDir(), "test.db"), box)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	ctx := context.Background()
+	review := &model.Review{ID: "pipeline-report", Repo: "group/repo", Status: model.ReviewRunning}
+	if err := st.InsertReview(ctx, review); err != nil {
+		t.Fatal(err)
+	}
+	runner := &Runner{Store: st}
+	report := "## Overseer Review\n\n完整报告"
+	if err := runner.finishReview(ctx, review.ID, model.ReviewSuccess, 3, 1, "", report); err != nil {
+		t.Fatal(err)
+	}
+	got, err := st.GetReview(ctx, review.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ReportMarkdown != report || got.Status != model.ReviewSuccess {
+		t.Fatalf("review = %#v", got)
+	}
+}
 
 func TestFormatMRSummaryUsesDiscussionsForPostedFindings(t *testing.T) {
 	all := []vcs.InlineComment{
