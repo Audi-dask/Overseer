@@ -176,8 +176,10 @@ type FirewallConfig struct {
 type NotifyKind string
 
 const (
-	NotifyFeishu  NotifyKind = "feishu"
-	NotifyWebhook NotifyKind = "webhook"
+	NotifyFeishu   NotifyKind = "feishu"
+	NotifyWebhook  NotifyKind = "webhook"
+	NotifyWeCom    NotifyKind = "wecom"
+	NotifyDingTalk NotifyKind = "dingtalk"
 )
 
 type NotifyChannel struct {

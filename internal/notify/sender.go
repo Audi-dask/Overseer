@@ -49,11 +49,17 @@ func Render(tmpl string, p Payload) string {
 }
 
 func (s *Sender) Send(ctx context.Context, ch model.NotifyChannel, text string, p Payload) error {
-	if ch.Kind == model.NotifyFeishu || isFeishuWebhookURL(ch.Target) {
-		return s.postJSON(ctx, ch.Target, feishuCard(p))
-	}
 	switch ch.Kind {
+	case model.NotifyFeishu:
+		return s.postJSON(ctx, ch.Target, feishuCard(p), model.NotifyFeishu)
+	case model.NotifyDingTalk:
+		return s.postJSON(ctx, ch.Target, dingTalkCard(p), model.NotifyDingTalk)
+	case model.NotifyWeCom:
+		return s.postJSON(ctx, ch.Target, weComMessage(p), model.NotifyWeCom)
 	case model.NotifyWebhook:
+		if isFeishuWebhookURL(ch.Target) {
+			return s.postJSON(ctx, ch.Target, feishuCard(p), model.NotifyFeishu)
+		}
 		return s.postJSON(ctx, ch.Target, map[string]any{
 			"text":       text,
 			"repo":       p.Repo,
@@ -63,7 +69,7 @@ func (s *Sender) Send(ctx context.Context, ch model.NotifyChannel, text string, 
 			"status":     p.Status,
 			"summary":    p.Summary,
 			"author":     p.Author,
-		})
+		}, model.NotifyWebhook)
 	default:
 		return fmt.Errorf("unsupported notify kind: %s", ch.Kind)
 	}
@@ -75,8 +81,71 @@ func isFeishuWebhookURL(u string) bool {
 		strings.Contains(u, "open.larksuite.com/open-apis/bot/v2/hook/")
 }
 
-// feishuCard builds an interactive card aligned with 参考/mr_note.py.
-func feishuCard(p Payload) map[string]any {
+func dingTalkCard(p Payload) map[string]any {
+	project, author := cardIdentity(p)
+	content := fmt.Sprintf("### Overseer · %s\n\n- **项目：** %s\n- **提交人：** %s\n- **审查状态：** %s\n- **审查结论：** %s", project, project, author, p.Status, cardSummary(p.Summary))
+	if strings.TrimSpace(p.MRURL) == "" {
+		return map[string]any{
+			"msgtype": "markdown",
+			"markdown": map[string]any{
+				"title": "Overseer · " + project,
+				"text":  content,
+			},
+		}
+	}
+	return map[string]any{
+		"msgtype": "actionCard",
+		"actionCard": map[string]any{
+			"title":          "Overseer · " + project,
+			"text":           content,
+			"singleTitle":    "查看详细报告",
+			"singleURL":      p.MRURL,
+			"btnOrientation": "0",
+		},
+	}
+}
+
+func weComMessage(p Payload) map[string]any {
+	project, author := cardIdentity(p)
+	summary := cardSummary(p.Summary)
+	if strings.TrimSpace(p.MRURL) == "" {
+		return map[string]any{
+			"msgtype": "markdown",
+			"markdown": map[string]any{
+				"content": fmt.Sprintf("## Overseer · %s\n>项目：%s\n>提交人：%s\n>审查状态：%s\n>审查结论：%s", project, project, author, p.Status, summary),
+			},
+		}
+	}
+	return map[string]any{
+		"msgtype": "template_card",
+		"template_card": map[string]any{
+			"card_type": "text_notice",
+			"main_title": map[string]any{
+				"title": "Overseer · " + project,
+				"desc":  "代码审查完成",
+			},
+			"horizontal_content_list": []any{
+				map[string]any{"keyname": "项目", "value": project},
+				map[string]any{"keyname": "提交人", "value": author},
+				map[string]any{"keyname": "审查状态", "value": p.Status},
+			},
+			"sub_title_text": "审查结论：" + summary,
+			"jump_list": []any{
+				map[string]any{
+					"type":  1,
+					"title": "查看详细报告",
+					"url":   p.MRURL,
+				},
+			},
+			"card_action": map[string]any{
+				"type": 1,
+				"url":  p.MRURL,
+			},
+		},
+	}
+}
+
+func cardIdentity(p Payload) (string, string) {
 	project := strings.TrimSpace(p.Repo)
 	if project == "" {
 		project = "Unknown Project"
@@ -85,6 +154,12 @@ func feishuCard(p Payload) map[string]any {
 	if author == "" {
 		author = "Unknown Author"
 	}
+	return project, author
+}
+
+// feishuCard builds an interactive card aligned with 参考/mr_note.py.
+func feishuCard(p Payload) map[string]any {
+	project, author := cardIdentity(p)
 
 	elements := []any{
 		map[string]any{
@@ -163,7 +238,7 @@ func cardSummary(raw string) string {
 	return summary
 }
 
-func (s *Sender) postJSON(ctx context.Context, url string, body any) error {
+func (s *Sender) postJSON(ctx context.Context, url string, body any, kind model.NotifyKind) error {
 	b, err := json.Marshal(body)
 	if err != nil {
 		return err
@@ -179,22 +254,40 @@ func (s *Sender) postJSON(ctx context.Context, url string, body any) error {
 	}
 	defer resp.Body.Close()
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-	if resp.StatusCode >= 300 {
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return fmt.Errorf("notify %s: %s", resp.Status, string(raw))
 	}
-	// Feishu bot returns HTTP 200 with {"code":0} even on some errors.
-	var feishu struct {
-		Code       int    `json:"code"`
-		Msg        string `json:"msg"`
-		StatusCode int    `json:"StatusCode"`
-		StatusMsg  string `json:"StatusMessage"`
-	}
-	if err := json.Unmarshal(raw, &feishu); err == nil {
-		if feishu.Code != 0 {
-			return fmt.Errorf("feishu code=%d msg=%s", feishu.Code, feishu.Msg)
+	switch kind {
+	case model.NotifyFeishu:
+		var result struct {
+			Code       int    `json:"code"`
+			Msg        string `json:"msg"`
+			StatusCode int    `json:"StatusCode"`
+			StatusMsg  string `json:"StatusMessage"`
 		}
-		if feishu.StatusCode != 0 {
-			return fmt.Errorf("feishu StatusCode=%d msg=%s", feishu.StatusCode, feishu.StatusMsg)
+		if err := json.Unmarshal(raw, &result); err == nil {
+			if result.Code != 0 {
+				return fmt.Errorf("feishu code=%d msg=%s", result.Code, result.Msg)
+			}
+			if result.StatusCode != 0 {
+				return fmt.Errorf("feishu StatusCode=%d msg=%s", result.StatusCode, result.StatusMsg)
+			}
+		}
+	case model.NotifyDingTalk:
+		var result struct {
+			ErrCode int    `json:"errcode"`
+			ErrMsg  string `json:"errmsg"`
+		}
+		if err := json.Unmarshal(raw, &result); err == nil && result.ErrCode != 0 {
+			return fmt.Errorf("dingtalk errcode=%d errmsg=%s", result.ErrCode, result.ErrMsg)
+		}
+	case model.NotifyWeCom:
+		var result struct {
+			ErrCode int    `json:"errcode"`
+			ErrMsg  string `json:"errmsg"`
+		}
+		if err := json.Unmarshal(raw, &result); err == nil && result.ErrCode != 0 {
+			return fmt.Errorf("wecom errcode=%d errmsg=%s", result.ErrCode, result.ErrMsg)
 		}
 	}
 	return nil

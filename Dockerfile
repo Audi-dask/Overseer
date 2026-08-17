@@ -11,8 +11,9 @@ RUN go mod download
 
 COPY . .
 
+ARG VERSION=dev
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath \
-    -ldflags="-s -w" \
+    -ldflags="-s -w -X github.com/Audi-dask/Overseer/internal/api.Version=${VERSION}" \
     -o /out/overseer \
     ./cmd/server
 

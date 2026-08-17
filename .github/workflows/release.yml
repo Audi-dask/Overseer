@@ -46,7 +46,7 @@ jobs:
 
             GOOS="$os" GOARCH="$arch" go build \
               -trimpath \
-              -ldflags="-s -w" \
+              -ldflags="-s -w -X github.com/Audi-dask/Overseer/internal/api.Version=${version}" \
               -o "dist/${binary}" \
               ./cmd/server
 

@@ -12,7 +12,7 @@
     <div id="app" class="app-shell">
       <div id="page-content" hidden>
         <div class="boundary-banner">
-          启用通知后选 Webhook 分组；飞书渠道发送 <code>interactive</code> 卡片（提交人 / 项目 / 结论摘要 + 跳转按钮），不重复审查正文。
+          启用通知后选择 Webhook 分组；飞书、钉钉和企业微信群机器人发送平台卡片，通用 Webhook 保持 JSON POST。
         </div>
 
         <div class="panel mb-3">
@@ -124,6 +124,8 @@
               <label class="form-label">类型</label>
               <select class="form-select" name="kind" required>
                 <option value="feishu">飞书机器人 Webhook</option>
+                <option value="dingtalk">钉钉群机器人 Webhook</option>
+                <option value="wecom">企业微信群机器人 Webhook</option>
                 <option value="webhook">通用 Webhook（JSON POST）</option>
               </select>
             </div>
@@ -149,7 +151,7 @@
     <script src="js/app.js"></script>
     <script>
       CR.mountShell("notifications", "通知渠道");
-      const kindLabel = { feishu: "飞书", webhook: "通用 Webhook" };
+      const kindLabel = { feishu: "飞书", dingtalk: "钉钉群机器人", wecom: "企业微信群机器人", webhook: "通用 Webhook" };
       let channels = [];
       let groups = [];
       const channelModal = new bootstrap.Modal(document.getElementById("channelModal"));
@@ -211,7 +213,7 @@
               </td>
             </tr>`
             )
-            .join("") || `<tr><td colspan="5" class="text-secondary">还没有渠道，点右上角添加飞书机器人 Webhook。</td></tr>`;
+            .join("") || `<tr><td colspan="5" class="text-secondary">还没有渠道，点右上角添加机器人 Webhook。</td></tr>`;
 
         document.querySelectorAll(".edit-group").forEach((el) => {
           el.addEventListener("click", () => {
@@ -268,7 +270,7 @@
             el.disabled = true;
             try {
               await CR.apiSend("POST", `/api/notifications/channels/${el.dataset.id}/test`);
-              CR.showToast("测试消息已发送，请到飞书群查看", "success");
+              CR.showToast("测试消息已发送，请到对应群聊查看", "success");
             } catch (err) {
               CR.showToast(String(err.message || err), "danger");
             } finally {

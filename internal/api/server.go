@@ -22,6 +22,8 @@ import (
 	"github.com/Audi-dask/Overseer/internal/vcs/gitlab"
 )
 
+var Version = "dev"
+
 type Server struct {
 	Store  *store.Store
 	Queue  *queue.DebouncedQueue
@@ -728,7 +730,7 @@ func (s *Server) getSettings(w http.ResponseWriter, r *http.Request) {
 		"admin_username":        username,
 		"admin_auth_enabled":    true,
 		"runtime": map[string]any{
-			"version": "0.4.0-overseer",
+			"version": Version,
 			"listen":  ":8080",
 		},
 	})
@@ -827,8 +829,9 @@ func (s *Server) upsertChannel(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, "target required")
 		return
 	}
-	if in.Kind != model.NotifyFeishu && in.Kind != model.NotifyWebhook {
-		writeErr(w, 400, "kind must be feishu or webhook")
+	if in.Kind != model.NotifyFeishu && in.Kind != model.NotifyWebhook &&
+		in.Kind != model.NotifyWeCom && in.Kind != model.NotifyDingTalk {
+		writeErr(w, 400, "kind must be feishu, webhook, wecom, or dingtalk")
 		return
 	}
 	ch, err := s.Store.UpsertNotifyChannel(r.Context(), in)
